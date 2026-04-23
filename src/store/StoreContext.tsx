@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useReducer, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Receipt, Screen } from '../types';
 import { ENTITIES } from '../data/entities';
@@ -6,8 +6,14 @@ import { uid } from '../lib/format';
 import { deletePhoto } from '../lib/photos';
 import { pushReceipt, deleteReceiptRemote, fetchAllReceipts } from '../lib/syncReceipts';
 
-const STORAGE_KEY_RECEIPTS = '@xfix-receipts:receipts:v2';
-const STORAGE_KEY_ENTITY   = '@xfix-receipts:entity:v2';
+// v3 keys are scoped by the authenticated user id so different accounts on the
+// same device don't bleed into each other's local cache. v2 keys (unscoped)
+// from earlier builds are migrated on first launch of the new version.
+const LEGACY_KEY_RECEIPTS = '@xfix-receipts:receipts:v2';
+const LEGACY_KEY_ENTITY   = '@xfix-receipts:entity:v2';
+const keyReceipts = (uid: string) => `@xfix-receipts:receipts:v3:${uid}`;
+const keyEntity   = (uid: string) => `@xfix-receipts:entity:v3:${uid}`;
+const keyMigrated = (uid: string) => `@xfix-receipts:v3-migrated:${uid}`;
 
 interface State {
   entityId: string;
@@ -15,6 +21,10 @@ interface State {
   currentReceiptId: string | null;
   receipts: Receipt[];
   ready: boolean;
+  // IDs of receipts whose most recent local write failed to reach Supabase.
+  // deleted receipts are tracked with a 'del:' prefix so we know to retry the
+  // delete rather than the upsert.
+  pendingSync: string[];
 }
 
 type Action =
@@ -23,10 +33,17 @@ type Action =
   | { type: 'NAVIGATE'; screen: Screen; receiptId?: string | null }
   | { type: 'ADD_RECEIPT'; receipt: Receipt }
   | { type: 'UPDATE_RECEIPT'; receipt: Receipt }
-  | { type: 'DELETE_RECEIPT'; id: string };
+  | { type: 'DELETE_RECEIPT'; id: string }
+  | { type: 'MARK_PENDING'; key: string }
+  | { type: 'MARK_SYNCED'; key: string };
 
 const initial: State = {
-  entityId: 'xfix', screen: 'home', currentReceiptId: null, receipts: [], ready: false,
+  entityId: 'xfix',
+  screen: 'home',
+  currentReceiptId: null,
+  receipts: [],
+  ready: false,
+  pendingSync: [],
 };
 
 function reducer(state: State, action: Action): State {
@@ -46,6 +63,12 @@ function reducer(state: State, action: Action): State {
       return { ...state, receipts: state.receipts.map(r => r.id === action.receipt.id ? action.receipt : r) };
     case 'DELETE_RECEIPT':
       return { ...state, receipts: state.receipts.filter(r => r.id !== action.id) };
+    case 'MARK_PENDING':
+      return state.pendingSync.includes(action.key)
+        ? state
+        : { ...state, pendingSync: [...state.pendingSync, action.key] };
+    case 'MARK_SYNCED':
+      return { ...state, pendingSync: state.pendingSync.filter(k => k !== action.key) };
     default:
       return state;
   }
@@ -57,28 +80,57 @@ interface StoreValue {
   currentEntity: (typeof ENTITIES)[number];
   currentReceipt: Receipt | null;
   receiptsForEntity: Receipt[];
+  unsyncedCount: number;
   setEntity: (id: string) => void;
   navigate: (screen: Screen, receiptId?: string | null) => void;
   addReceipt: (r: Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'>) => Receipt;
   updateReceipt: (r: Receipt) => void;
   deleteReceipt: (id: string) => Promise<void>;
+  retryPendingSync: () => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+
+// One-time migration from the unscoped v2 keys. Current-user inherits any
+// legacy data that existed on the device; legacy keys are then cleared so
+// a second user signing in later can't pick them up.
+async function migrateV2IfNeeded(userId: string): Promise<void> {
+  const done = await AsyncStorage.getItem(keyMigrated(userId));
+  if (done) return;
+  try {
+    const [legacyReceipts, legacyEntity] = await Promise.all([
+      AsyncStorage.getItem(LEGACY_KEY_RECEIPTS),
+      AsyncStorage.getItem(LEGACY_KEY_ENTITY),
+    ]);
+    if (legacyReceipts) await AsyncStorage.setItem(keyReceipts(userId), legacyReceipts);
+    if (legacyEntity)   await AsyncStorage.setItem(keyEntity(userId), legacyEntity);
+    await AsyncStorage.multiRemove([LEGACY_KEY_RECEIPTS, LEGACY_KEY_ENTITY]);
+  } catch {
+    // Non-fatal — worst case we fall through to a Supabase fetch.
+  }
+  await AsyncStorage.setItem(keyMigrated(userId), '1');
+}
 
 export function StoreProvider({ children, userId }: { children: React.ReactNode; userId: string }) {
   const [state, dispatch] = useReducer(reducer, initial);
   const hydratedRef = useRef(false);
   const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+  // Snapshot of latest receipts, readable from callbacks that may outlive
+  // a given render.
+  const receiptsRef = useRef<Receipt[]>([]);
+  receiptsRef.current = state.receipts;
 
-  // Hydrate: AsyncStorage first (fast/offline), then Supabase if local is empty (fresh install).
+  // Hydrate: migrate legacy keys, then AsyncStorage (fast/offline), then
+  // Supabase if local is empty (fresh install).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        await migrateV2IfNeeded(userId);
         const [rawReceipts, savedEntity] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEY_RECEIPTS),
-          AsyncStorage.getItem(STORAGE_KEY_ENTITY),
+          AsyncStorage.getItem(keyReceipts(userId)),
+          AsyncStorage.getItem(keyEntity(userId)),
         ]);
         let receipts: Receipt[] = [];
         if (rawReceipts) {
@@ -103,51 +155,84 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [userId]);
 
   // Persist receipts locally on every change.
   useEffect(() => {
     if (!hydratedRef.current) return;
-    AsyncStorage.setItem(STORAGE_KEY_RECEIPTS, JSON.stringify(state.receipts)).catch(() => {});
+    AsyncStorage.setItem(keyReceipts(userIdRef.current), JSON.stringify(state.receipts)).catch(() => {});
   }, [state.receipts]);
 
   // Persist selected entity locally.
   useEffect(() => {
     if (!hydratedRef.current) return;
-    AsyncStorage.setItem(STORAGE_KEY_ENTITY, state.entityId).catch(() => {});
+    AsyncStorage.setItem(keyEntity(userIdRef.current), state.entityId).catch(() => {});
   }, [state.entityId]);
 
-  const sync = {
-    push: (r: Receipt) => pushReceipt(r, userIdRef.current).catch(() => {}),
-    remove: (id: string) => deleteReceiptRemote(id).catch(() => {}),
-  };
+  const pushOne = useCallback(async (r: Receipt) => {
+    try {
+      await pushReceipt(r, userIdRef.current);
+      dispatch({ type: 'MARK_SYNCED', key: r.id });
+    } catch {
+      dispatch({ type: 'MARK_PENDING', key: r.id });
+    }
+  }, []);
+
+  const removeOne = useCallback(async (id: string) => {
+    try {
+      await deleteReceiptRemote(id);
+      dispatch({ type: 'MARK_SYNCED', key: `del:${id}` });
+      dispatch({ type: 'MARK_SYNCED', key: id });
+    } catch {
+      dispatch({ type: 'MARK_PENDING', key: `del:${id}` });
+    }
+  }, []);
+
+  const retryPendingSync = useCallback(async () => {
+    const keys = [...state.pendingSync];
+    for (const key of keys) {
+      if (key.startsWith('del:')) {
+        await removeOne(key.slice(4));
+      } else {
+        const r = receiptsRef.current.find(x => x.id === key);
+        if (r) await pushOne(r);
+        else dispatch({ type: 'MARK_SYNCED', key });
+      }
+    }
+  }, [state.pendingSync, pushOne, removeOne]);
 
   const currentEntity = ENTITIES.find(e => e.id === state.entityId) ?? ENTITIES[0];
   const receiptsForEntity = state.receipts.filter(r => r.entityId === state.entityId);
   const currentReceipt = state.receipts.find(r => r.id === state.currentReceiptId) ?? null;
 
   const value: StoreValue = {
-    state, entities: ENTITIES, currentEntity, currentReceipt, receiptsForEntity,
+    state,
+    entities: ENTITIES,
+    currentEntity,
+    currentReceipt,
+    receiptsForEntity,
+    unsyncedCount: state.pendingSync.length,
     setEntity: id => dispatch({ type: 'SET_ENTITY', id }),
     navigate: (screen, receiptId) => dispatch({ type: 'NAVIGATE', screen, receiptId }),
     addReceipt: r => {
       const now = Date.now();
       const receipt: Receipt = { ...r, id: uid(), createdAt: now, updatedAt: now };
       dispatch({ type: 'ADD_RECEIPT', receipt });
-      sync.push(receipt);
+      pushOne(receipt);
       return receipt;
     },
     updateReceipt: r => {
       const updated = { ...r, updatedAt: Date.now() };
       dispatch({ type: 'UPDATE_RECEIPT', receipt: updated });
-      sync.push(updated);
+      pushOne(updated);
     },
     deleteReceipt: async id => {
       const r = state.receipts.find(x => x.id === id);
       if (r?.photoUri) await deletePhoto(r.photoUri);
       dispatch({ type: 'DELETE_RECEIPT', id });
-      sync.remove(id);
+      await removeOne(id);
     },
+    retryPendingSync,
   };
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

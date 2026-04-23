@@ -33,15 +33,18 @@ function fromRow(row: Row): Receipt {
 }
 
 export async function pushReceipt(receipt: Receipt, userId: string): Promise<void> {
-  await supabase.from('receipts').upsert(toRow(receipt, userId));
+  const { error } = await supabase.from('receipts').upsert(toRow(receipt, userId));
+  if (error) throw error;
 }
 
 export async function deleteReceiptRemote(id: string): Promise<void> {
-  await supabase.from('receipts').delete().eq('id', id);
+  const { error } = await supabase.from('receipts').delete().eq('id', id);
+  if (error) throw error;
 }
 
 export async function fetchAllReceipts(): Promise<Receipt[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('receipts').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
   return (data ?? []).map(r => fromRow(r as Row));
 }
