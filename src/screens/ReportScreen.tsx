@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
@@ -45,63 +45,64 @@ export function ReportScreen() {
         <View style={{ width: 80 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
-        <View style={styles.summary}>
-          <Text style={styles.kicker}>REPORT · {monthLabel} · {currentEntity.short.toUpperCase()}</Text>
-          <Text style={[styles.total, { fontFamily: fonts.sfMono }]}>${total.toFixed(2)}</Text>
-          <Text style={styles.sub}>
-            {included.length} receipt{included.length === 1 ? '' : 's'}
-            {dateRange ? ` · ${dateRange}` : ''}
-          </Text>
-        </View>
-
-        {byCategory.length > 0 && (
+      <FlatList
+        contentContainerStyle={{ paddingBottom: 140 }}
+        data={included}
+        keyExtractor={r => r.id}
+        renderItem={({ item, index }) => (
           <View style={styles.sectionPad}>
-            <View style={styles.card}>
-              <Text style={styles.cardHeader}>BY CATEGORY</Text>
-              {byCategory.map(b => (
-                <View key={b.cat} style={styles.catRow}>
-                  <View style={styles.catTextRow}>
-                    <Text style={styles.catLabel} numberOfLines={1}>{b.cat}</Text>
-                    <Text style={[styles.catAmt, { fontFamily: fonts.sfMono }]}>${b.amt.toFixed(2)}</Text>
-                  </View>
-                  <View style={styles.catBarBg}>
-                    <View style={[styles.catBar, { width: `${(b.amt / maxCat) * 100}%` }]} />
-                  </View>
-                </View>
-              ))}
+            <View style={[styles.receiptRowWrap, index === 0 && styles.receiptRowWrapFirst, index === included.length - 1 && styles.receiptRowWrapLast]}>
+              <ReceiptRow
+                receipt={item}
+                onPress={() => navigate('review', item.id)}
+                embedded
+                isLast={index === included.length - 1}
+              />
             </View>
           </View>
         )}
-
-        {included.length > 0 && (
+        ListHeaderComponent={
           <>
-            <View style={[styles.sectionPad, styles.listHeaderRow]}>
-              <Text style={styles.listHeader}>RECEIPTS</Text>
+            <View style={styles.summary}>
+              <Text style={styles.kicker}>REPORT · {monthLabel} · {currentEntity.short.toUpperCase()}</Text>
+              <Text style={[styles.total, { fontFamily: fonts.sfMono }]}>${total.toFixed(2)}</Text>
+              <Text style={styles.sub}>
+                {included.length} receipt{included.length === 1 ? '' : 's'}
+                {dateRange ? ` · ${dateRange}` : ''}
+              </Text>
             </View>
-            <View style={styles.sectionPad}>
-              <View style={styles.receiptList}>
-                {included.map((r, i) => (
-                  <ReceiptRow
-                    key={r.id}
-                    receipt={r}
-                    onPress={() => navigate('review', r.id)}
-                    embedded
-                    isLast={i === included.length - 1}
-                  />
-                ))}
+            {byCategory.length > 0 && (
+              <View style={styles.sectionPad}>
+                <View style={styles.card}>
+                  <Text style={styles.cardHeader}>BY CATEGORY</Text>
+                  {byCategory.map(b => (
+                    <View key={b.cat} style={styles.catRow}>
+                      <View style={styles.catTextRow}>
+                        <Text style={styles.catLabel} numberOfLines={1}>{b.cat}</Text>
+                        <Text style={[styles.catAmt, { fontFamily: fonts.sfMono }]}>${b.amt.toFixed(2)}</Text>
+                      </View>
+                      <View style={styles.catBarBg}>
+                        <View style={[styles.catBar, { width: `${(b.amt / maxCat) * 100}%` }]} />
+                      </View>
+                    </View>
+                  ))}
+                </View>
               </View>
-            </View>
+            )}
+            {included.length > 0 && (
+              <View style={[styles.sectionPad, styles.listHeaderRow]}>
+                <Text style={styles.listHeader}>RECEIPTS</Text>
+              </View>
+            )}
           </>
-        )}
-
-        {included.length === 0 && (
+        }
+        ListEmptyComponent={
           <View style={[styles.sectionPad, { alignItems: 'center', paddingTop: 40 }]}>
             <Text style={styles.emptyTitle}>No receipts in this report</Text>
             <Text style={styles.emptySub}>Capture and review receipts to see them here.</Text>
           </View>
-        )}
-      </ScrollView>
+        }
+      />
 
       <SafeAreaView edges={['bottom']} style={styles.bottomBar}>
         <Pressable
@@ -165,6 +166,23 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 0.5,
     borderColor: 'rgba(60,60,67,0.08)',
+  },
+  receiptRowWrap: {
+    backgroundColor: '#fff',
+    borderLeftWidth: 0.5,
+    borderRightWidth: 0.5,
+    borderColor: 'rgba(60,60,67,0.08)',
+    overflow: 'hidden',
+  },
+  receiptRowWrapFirst: {
+    borderTopWidth: 0.5,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  receiptRowWrapLast: {
+    borderBottomWidth: 0.5,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
   },
   emptyTitle: { fontSize: 17, fontWeight: '600', color: '#000' },
   emptySub: { fontSize: 13, color: 'rgba(60,60,67,0.6)', marginTop: 4 },
