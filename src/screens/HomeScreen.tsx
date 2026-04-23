@@ -9,9 +9,20 @@ import { ReceiptRow } from '../components/ReceiptRow';
 import { fmtDateFull } from '../lib/format';
 import { colors, fonts } from '../theme';
 
+type StatusFilter = null | 'synced' | 'ready' | 'needs-review';
+const FILTER_TITLES: Record<Exclude<StatusFilter, null>, string> = {
+  synced: 'Synced',
+  ready: 'Ready',
+  'needs-review': 'Needs review',
+};
+
 export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
   const { currentEntity, receiptsForEntity, navigate, unsyncedCount, retryPendingSync, refreshFromCloud } = useStore();
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(null);
+
+  const toggleFilter = (s: Exclude<StatusFilter, null>) =>
+    setStatusFilter(prev => (prev === s ? null : s));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -51,6 +62,9 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
   const today = fmtDateFull(new Date().toISOString().slice(0, 10));
   const needsAttention = receiptsForEntity.filter(r => r.status === 'needs-review');
   const recent = receiptsForEntity.filter(r => r.status !== 'needs-review').slice(0, 6);
+  const filtered = statusFilter
+    ? receiptsForEntity.filter(r => r.status === statusFilter)
+    : [];
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -113,9 +127,9 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
               <View style={[styles.barSeg, { flex: Math.max(stats.review, 0.001), backgroundColor: colors.warning }]} />
             </View>
             <View style={styles.legend}>
-              <Legend color={colors.success} label="Synced" n={stats.synced} />
-              <Legend color={colors.accent} label="Ready" n={stats.ready} />
-              <Legend color={colors.warning} label="Review" n={stats.review} />
+              <Legend color={colors.success} label="Synced" n={stats.synced} active={statusFilter === 'synced'} onPress={() => toggleFilter('synced')} />
+              <Legend color={colors.accent}  label="Ready"  n={stats.ready}  active={statusFilter === 'ready'}  onPress={() => toggleFilter('ready')} />
+              <Legend color={colors.warning} label="Review" n={stats.review} active={statusFilter === 'needs-review'} onPress={() => toggleFilter('needs-review')} />
             </View>
           </View>
         </View>
@@ -126,35 +140,65 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
           <QuickAction icon="layers" title="Batch" sub="Multiple at once" onPress={() => navigate('batch')} />
         </View>
 
-        {/* Needs attention */}
-        {needsAttention.length > 0 && (
+        {/* Filtered list (takes over when a legend chip is active) */}
+        {statusFilter !== null ? (
           <>
-            <SectionHeader title="Needs attention" right={`${needsAttention.length} item${needsAttention.length === 1 ? '' : 's'}`} />
+            <SectionHeader
+              title={FILTER_TITLES[statusFilter]}
+              right={`${filtered.length} item${filtered.length === 1 ? '' : 's'} · clear`}
+              onRightPress={() => setStatusFilter(null)}
+            />
             <View style={styles.sectionPad}>
-              {needsAttention.map(r => (
-                <ReceiptRow key={r.id} receipt={r} onPress={() => navigate('review', r.id)} highlight />
-              ))}
+              {filtered.length > 0 ? (
+                <View style={styles.embeddedList}>
+                  {filtered.map((r, i) => (
+                    <ReceiptRow
+                      key={r.id}
+                      receipt={r}
+                      onPress={() => navigate('review', r.id)}
+                      embedded
+                      isLast={i === filtered.length - 1}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.filterEmpty}>No {FILTER_TITLES[statusFilter].toLowerCase()} receipts.</Text>
+              )}
             </View>
           </>
-        )}
-
-        {/* Recent */}
-        {recent.length > 0 && (
+        ) : (
           <>
-            <SectionHeader title="Recent" right="See all" />
-            <View style={styles.sectionPad}>
-              <View style={styles.embeddedList}>
-                {recent.map((r, i) => (
-                  <ReceiptRow
-                    key={r.id}
-                    receipt={r}
-                    onPress={() => navigate('review', r.id)}
-                    embedded
-                    isLast={i === recent.length - 1}
-                  />
-                ))}
-              </View>
-            </View>
+            {/* Needs attention */}
+            {needsAttention.length > 0 && (
+              <>
+                <SectionHeader title="Needs attention" right={`${needsAttention.length} item${needsAttention.length === 1 ? '' : 's'}`} />
+                <View style={styles.sectionPad}>
+                  {needsAttention.map(r => (
+                    <ReceiptRow key={r.id} receipt={r} onPress={() => navigate('review', r.id)} highlight />
+                  ))}
+                </View>
+              </>
+            )}
+
+            {/* Recent */}
+            {recent.length > 0 && (
+              <>
+                <SectionHeader title="Recent" right="See all" />
+                <View style={styles.sectionPad}>
+                  <View style={styles.embeddedList}>
+                    {recent.map((r, i) => (
+                      <ReceiptRow
+                        key={r.id}
+                        receipt={r}
+                        onPress={() => navigate('review', r.id)}
+                        embedded
+                        isLast={i === recent.length - 1}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </>
+            )}
           </>
         )}
 
@@ -202,21 +246,25 @@ function IconBtn({ icon, onPress }: { icon: IconName; onPress?: () => void }) {
   );
 }
 
-function Legend({ color, label, n }: { color: string; label: string; n: number }) {
+function Legend({ color, label, n, active, onPress }: { color: string; label: string; n: number; active?: boolean; onPress?: () => void }) {
   return (
-    <View style={styles.legendItem}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.legendItem, active && styles.legendItemActive, pressed && { opacity: 0.6 }]}>
       <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <Text style={styles.legendLabel}>{label}</Text>
-      <Text style={styles.legendN}>{n}</Text>
-    </View>
+      <Text style={[styles.legendLabel, active && styles.legendLabelActive]}>{label}</Text>
+      <Text style={[styles.legendN, active && styles.legendNActive]}>{n}</Text>
+    </Pressable>
   );
 }
 
-function SectionHeader({ title, right }: { title: string; right?: string }) {
+function SectionHeader({ title, right, onRightPress }: { title: string; right?: string; onRightPress?: () => void }) {
   return (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionHeaderTitle}>{title.toUpperCase()}</Text>
-      {right && <Text style={styles.sectionHeaderRight}>{right}</Text>}
+      {right && (
+        onRightPress
+          ? <Pressable onPress={onRightPress}><Text style={styles.sectionHeaderRight}>{right}</Text></Pressable>
+          : <Text style={styles.sectionHeaderRight}>{right}</Text>
+      )}
     </View>
   );
 }
@@ -295,11 +343,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(60,60,67,0.06)',
   },
   barSeg: { height: '100%' },
-  legend: { flexDirection: 'row', gap: 16, marginTop: 10 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  legend: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 99,
+  },
+  legendItemActive: {
+    backgroundColor: 'rgba(60,60,67,0.08)',
+  },
   legendDot: { width: 6, height: 6, borderRadius: 99 },
   legendLabel: { fontSize: 12, color: 'rgba(60,60,67,0.7)' },
+  legendLabelActive: { color: '#000', fontWeight: '600' },
   legendN: { fontSize: 12, color: 'rgba(60,60,67,0.5)' },
+  legendNActive: { color: '#000' },
+  filterEmpty: {
+    paddingVertical: 20,
+    textAlign: 'center',
+    color: 'rgba(60,60,67,0.55)',
+    fontSize: 13,
+  },
   actionsRow: { flexDirection: 'row', gap: 10 },
   qa: {
     flex: 1,
