@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Receipt, Screen } from '../types';
 import { ENTITIES } from '../data/entities';
@@ -34,6 +35,7 @@ type Action =
   | { type: 'ADD_RECEIPT'; receipt: Receipt }
   | { type: 'UPDATE_RECEIPT'; receipt: Receipt }
   | { type: 'DELETE_RECEIPT'; id: string }
+  | { type: 'REFRESH'; receipts: Receipt[] }
   | { type: 'SET_PHOTO_URI'; id: string; uri: string }
   | { type: 'MARK_PENDING'; key: string }
   | { type: 'MARK_SYNCED'; key: string };
@@ -64,6 +66,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, receipts: state.receipts.map(r => r.id === action.receipt.id ? action.receipt : r) };
     case 'DELETE_RECEIPT':
       return { ...state, receipts: state.receipts.filter(r => r.id !== action.id) };
+    case 'REFRESH':
+      return { ...state, receipts: action.receipts };
     case 'SET_PHOTO_URI':
       return {
         ...state,
@@ -95,6 +99,7 @@ interface StoreValue {
   updateReceipt: (r: Receipt) => void;
   deleteReceipt: (id: string) => Promise<void>;
   setLocalPhotoUri: (id: string, uri: string) => void;
+  refreshFromCloud: () => Promise<void>;
   retryPendingSync: () => Promise<void>;
 }
 
@@ -129,6 +134,8 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
   // a given render.
   const receiptsRef = useRef<Receipt[]>([]);
   receiptsRef.current = state.receipts;
+  const pendingSyncRef = useRef<string[]>([]);
+  pendingSyncRef.current = state.pendingSync;
 
   // Hydrate: migrate legacy keys, then AsyncStorage (fast/offline), then
   // Supabase if local is empty (fresh install).
@@ -239,6 +246,39 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     }
   }, [pushOne]);
 
+  // Full refresh from cloud. Merges with local: remote rows take precedence
+  // on updated_at ties, but any local-only receipt that hasn't been pushed
+  // yet (id is in pendingSync) is preserved so offline captures don't vanish.
+  const refreshFromCloud = useCallback(async () => {
+    try {
+      const incoming = await fetchAllReceipts();
+      const incomingIds = new Set(incoming.map(r => r.id));
+      const pending = new Set(pendingSyncRef.current);
+      const localOnly = receiptsRef.current.filter(r => !incomingIds.has(r.id) && pending.has(r.id));
+      const merged: Receipt[] = incoming.map(r => {
+        const local = receiptsRef.current.find(x => x.id === r.id);
+        return local && local.updatedAt > r.updatedAt ? local : r;
+      });
+      dispatch({ type: 'REFRESH', receipts: [...localOnly, ...merged] });
+    } catch {
+      // Network issue, etc. — leave state as-is.
+    }
+  }, []);
+
+  // Belt-and-suspenders in case the Realtime socket drops or missed events:
+  // whenever the app returns from background, pull the full set again.
+  useEffect(() => {
+    if (!hydratedRef.current) {
+      // defer until after initial hydrate
+    }
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active' && hydratedRef.current) {
+        refreshFromCloud();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshFromCloud]);
+
   const retryPendingSync = useCallback(async () => {
     const keys = [...state.pendingSync];
     for (const key of keys) {
@@ -301,6 +341,7 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     // Local-only photoUri update (does not push to Supabase). Used when a
     // download-on-demand resolves a remote photo onto the device.
     setLocalPhotoUri: (id, uri) => dispatch({ type: 'SET_PHOTO_URI', id, uri }),
+    refreshFromCloud,
     retryPendingSync,
   };
 
