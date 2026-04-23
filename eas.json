@@ -18,7 +18,11 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nvefrdnafsplxlawmmmb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im52ZWZyZG5hZnNwbHhsYXdtbW1iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NjY2MDEsImV4cCI6MjA5MjU0MjYwMX0.q-F3IBLKrE61iJ4Aq_iMnOIC4inHZqg2laqy2uUEwlM"
+      }
     }
   },
   "submit": {
