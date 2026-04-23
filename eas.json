@@ -18,7 +18,8 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "prebuildCommand": "rm -rf .expo && npx expo prebuild --no-install --platform ios"
     }
   },
   "submit": {
