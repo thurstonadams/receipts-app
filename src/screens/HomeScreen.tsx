@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
+import React, { useMemo, useState, useCallback } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { supabase } from '../lib/supabase';
@@ -10,7 +10,17 @@ import { fmtDateFull } from '../lib/format';
 import { colors, fonts } from '../theme';
 
 export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
-  const { currentEntity, receiptsForEntity, navigate, unsyncedCount, retryPendingSync } = useStore();
+  const { currentEntity, receiptsForEntity, navigate, unsyncedCount, retryPendingSync, refreshFromCloud } = useStore();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshFromCloud(), retryPendingSync()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshFromCloud, retryPendingSync]);
 
   const handleProfilePress = async () => {
     const { data } = await supabase.auth.getUser();
@@ -44,7 +54,16 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 80 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.accent}
+          />
+        }
+      >
         {/* Entity pill */}
         <View style={styles.pillRow}>
           <EntityPill entity={currentEntity} onPress={onOpenSwitcher} />
