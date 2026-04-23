@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Image,
   Alert,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -19,6 +20,7 @@ import { CATEGORIES, PAYMENT_METHODS, PROJECTS } from '../data/categories';
 import { fmtDateFull } from '../lib/format';
 import { colors, fonts } from '../theme';
 import { Receipt } from '../types';
+import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 
 export function ReviewScreen() {
   const { currentReceipt, updateReceipt, deleteReceipt, navigate, currentEntity } = useStore();
@@ -34,6 +36,8 @@ export function ReviewScreen() {
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
   const [pickerOpen, setPickerOpen] = useState<'category' | 'payment' | 'project' | null>(null);
+
+  const photo = useReceiptPhoto(initial);
 
   const categoryOptions: PickerOption[] = useMemo(
     () => CATEGORIES.map(c => ({ value: c.name, label: c.name, sub: c.code })),
@@ -110,15 +114,24 @@ export function ReviewScreen() {
 
         <ScrollView contentContainerStyle={{ paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
           {/* Photo preview */}
-          {initial.photoUri ? (
+          {photo.uri ? (
             <View style={styles.photoWrap}>
-              <Image source={{ uri: initial.photoUri }} style={styles.photo} resizeMode="contain" />
+              <Image source={{ uri: photo.uri }} style={styles.photo} resizeMode="contain" />
+            </View>
+          ) : photo.loading ? (
+            <View style={styles.photoWrap}>
+              <View style={styles.noPhoto}>
+                <ActivityIndicator color={colors.accent} />
+                <Text style={styles.noPhotoText}>Restoring photo from cloud…</Text>
+              </View>
             </View>
           ) : (
             <View style={styles.photoWrap}>
               <View style={styles.noPhoto}>
                 <Icon name="receipt" size={36} color="rgba(60,60,67,0.4)" />
-                <Text style={styles.noPhotoText}>No photo — entering manually</Text>
+                <Text style={styles.noPhotoText}>
+                  {initial.photoPath ? 'Photo unavailable on this device' : 'No photo — entering manually'}
+                </Text>
               </View>
             </View>
           )}

@@ -5,6 +5,7 @@ import { ReceiptThumb } from './ReceiptThumb';
 import { StatusChip } from './StatusChip';
 import { fmtDate } from '../lib/format';
 import { fonts } from '../theme';
+import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 
 interface Props {
   receipt: Receipt;
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false, highlight = false }: Props) {
+  const { uri } = useReceiptPhoto(receipt);
   return (
     <Pressable
       onPress={onPress}
@@ -26,7 +28,7 @@ export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false,
         pressed && { opacity: 0.6 },
       ]}
     >
-      <ReceiptThumb tone={receipt.thumbTone} size={36} photoUri={receipt.photoUri} />
+      <ReceiptThumb tone={receipt.thumbTone} size={36} photoUri={uri} />
       <View style={styles.middle}>
         <Text style={styles.vendor} numberOfLines={1}>
           {receipt.vendor}

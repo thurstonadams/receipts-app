@@ -34,6 +34,7 @@ type Action =
   | { type: 'ADD_RECEIPT'; receipt: Receipt }
   | { type: 'UPDATE_RECEIPT'; receipt: Receipt }
   | { type: 'DELETE_RECEIPT'; id: string }
+  | { type: 'SET_PHOTO_URI'; id: string; uri: string }
   | { type: 'MARK_PENDING'; key: string }
   | { type: 'MARK_SYNCED'; key: string };
 
@@ -63,6 +64,13 @@ function reducer(state: State, action: Action): State {
       return { ...state, receipts: state.receipts.map(r => r.id === action.receipt.id ? action.receipt : r) };
     case 'DELETE_RECEIPT':
       return { ...state, receipts: state.receipts.filter(r => r.id !== action.id) };
+    case 'SET_PHOTO_URI':
+      return {
+        ...state,
+        receipts: state.receipts.map(r =>
+          r.id === action.id ? { ...r, photoUri: action.uri } : r,
+        ),
+      };
     case 'MARK_PENDING':
       return state.pendingSync.includes(action.key)
         ? state
@@ -86,6 +94,7 @@ interface StoreValue {
   addReceipt: (r: Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'>) => Receipt;
   updateReceipt: (r: Receipt) => void;
   deleteReceipt: (id: string) => Promise<void>;
+  setLocalPhotoUri: (id: string, uri: string) => void;
   retryPendingSync: () => Promise<void>;
 }
 
@@ -265,6 +274,9 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
       dispatch({ type: 'DELETE_RECEIPT', id });
       await removeOne(id);
     },
+    // Local-only photoUri update (does not push to Supabase). Used when a
+    // download-on-demand resolves a remote photo onto the device.
+    setLocalPhotoUri: (id, uri) => dispatch({ type: 'SET_PHOTO_URI', id, uri }),
     retryPendingSync,
   };
 
