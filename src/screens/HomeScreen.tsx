@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
+import { supabase } from '../lib/supabase';
 import { EntityPill } from '../components/EntityPill';
 import { Icon, IconName } from '../components/Icon';
 import { ReceiptRow } from '../components/ReceiptRow';
@@ -9,7 +10,24 @@ import { fmtDateFull } from '../lib/format';
 import { colors, fonts } from '../theme';
 
 export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
-  const { currentEntity, receiptsForEntity, navigate } = useStore();
+  const { currentEntity, receiptsForEntity, navigate, unsyncedCount, retryPendingSync } = useStore();
+
+  const handleProfilePress = async () => {
+    const { data } = await supabase.auth.getUser();
+    const email = data.user?.email ?? 'this account';
+    Alert.alert(
+      'Account',
+      `Signed in as ${email}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign out',
+          style: 'destructive',
+          onPress: () => { supabase.auth.signOut(); },
+        },
+      ],
+    );
+  };
 
   const stats = useMemo(() => {
     const total = receiptsForEntity.reduce((s, r) => s + r.total, 0);
@@ -40,9 +58,25 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
           </View>
           <View style={styles.titleIcons}>
             <IconBtn icon="search" />
-            <IconBtn icon="user" />
+            <IconBtn icon="user" onPress={handleProfilePress} />
           </View>
         </View>
+
+        {/* Unsynced banner */}
+        {unsyncedCount > 0 && (
+          <View style={styles.sectionPad}>
+            <Pressable
+              onPress={() => { retryPendingSync(); }}
+              style={({ pressed }) => [styles.syncBanner, pressed && { opacity: 0.85 }]}
+            >
+              <View style={styles.syncDot} />
+              <Text style={styles.syncText} numberOfLines={1}>
+                {unsyncedCount} receipt{unsyncedCount === 1 ? '' : 's'} not backed up — tap to retry
+              </Text>
+              <Icon name="chevron" size={14} color={colors.warning} />
+            </Pressable>
+          </View>
+        )}
 
         {/* Summary card */}
         <View style={styles.sectionPad}>
@@ -141,9 +175,9 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
   );
 }
 
-function IconBtn({ icon }: { icon: IconName }) {
+function IconBtn({ icon, onPress }: { icon: IconName; onPress?: () => void }) {
   return (
-    <Pressable style={styles.iconBtn}>
+    <Pressable style={styles.iconBtn} onPress={onPress}>
       <Icon name={icon} size={20} color={colors.accent} />
     </Pressable>
   );
@@ -316,4 +350,27 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 17, fontWeight: '600', color: '#000' },
   emptySub: { fontSize: 13, color: 'rgba(60,60,67,0.6)', marginTop: 4 },
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(194,91,58,0.10)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 0.5,
+    borderColor: 'rgba(194,91,58,0.22)',
+  },
+  syncDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 99,
+    backgroundColor: colors.warning,
+  },
+  syncText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.warningText,
+    fontWeight: '500',
+  },
 });
