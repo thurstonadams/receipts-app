@@ -1,5 +1,6 @@
 node_modules/
-.expo/
+.expo/*
+!.expo/web
 dist/
 web-build/
 *.log
