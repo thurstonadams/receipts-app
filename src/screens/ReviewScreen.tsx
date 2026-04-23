@@ -10,8 +10,10 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
@@ -21,6 +23,15 @@ import { fmtDateFull } from '../lib/format';
 import { colors, fonts } from '../theme';
 import { Receipt } from '../types';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
+
+function parseISODate(iso: string): Date {
+  const d = new Date(iso + 'T00:00:00');
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+function toISODate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 export function ReviewScreen() {
   const { currentReceipt, updateReceipt, deleteReceipt, navigate, currentEntity } = useStore();
@@ -36,6 +47,8 @@ export function ReviewScreen() {
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
   const [pickerOpen, setPickerOpen] = useState<'category' | 'payment' | 'project' | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [pendingDate, setPendingDate] = useState<Date>(() => parseISODate(initial?.date ?? ''));
 
   const photo = useReceiptPhoto(initial);
 
@@ -169,11 +182,14 @@ export function ReviewScreen() {
           {/* Vendor, Date */}
           <FieldGroup>
             <TextField label="Vendor" value={vendor} onChangeText={setVendor} placeholder="e.g. Shell Gas Station" />
-            <TextField
+            <PickerField
               label="Date"
-              value={date}
-              onChangeText={setDate}
-              placeholder="YYYY-MM-DD"
+              value={date ? fmtDateFull(date) : 'Select date'}
+              sub={date || undefined}
+              onPress={() => {
+                setPendingDate(parseISODate(date));
+                setDatePickerOpen(true);
+              }}
               last
             />
           </FieldGroup>
@@ -225,6 +241,50 @@ export function ReviewScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={datePickerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDatePickerOpen(false)}
+      >
+        <Pressable style={datePickerStyles.backdrop} onPress={() => setDatePickerOpen(false)}>
+          <Pressable style={datePickerStyles.sheet} onPress={() => { /* swallow */ }}>
+            <View style={datePickerStyles.handleRow}>
+              <View style={datePickerStyles.handle} />
+            </View>
+            <View style={datePickerStyles.header}>
+              <Pressable onPress={() => setDatePickerOpen(false)}>
+                <Text style={datePickerStyles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Text style={datePickerStyles.title}>Receipt date</Text>
+              <Pressable
+                onPress={() => {
+                  setDate(toISODate(pendingDate));
+                  setDatePickerOpen(false);
+                }}
+              >
+                <Text style={datePickerStyles.doneText}>Done</Text>
+              </Pressable>
+            </View>
+            <DateTimePicker
+              value={pendingDate}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              maximumDate={new Date()}
+              onChange={(_e: DateTimePickerEvent, d?: Date) => {
+                if (d) setPendingDate(d);
+                if (Platform.OS !== 'ios') {
+                  // Android returns onChange with dismiss action; close + commit.
+                  setDatePickerOpen(false);
+                  if (d) setDate(toISODate(d));
+                }
+              }}
+              style={{ alignSelf: 'stretch' }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <PickerSheet
         visible={pickerOpen === 'category'}
@@ -410,4 +470,33 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 10,
   },
+});
+
+const datePickerStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 24,
+  },
+  handleRow: { alignItems: 'center', paddingVertical: 10 },
+  handle: {
+    width: 36, height: 4, borderRadius: 4,
+    backgroundColor: 'rgba(60,60,67,0.2)',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  cancelText: { color: 'rgba(60,60,67,0.7)', fontSize: 15 },
+  doneText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
+  title: { fontSize: 15, fontWeight: '600' },
 });
