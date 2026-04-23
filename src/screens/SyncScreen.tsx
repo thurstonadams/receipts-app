@@ -6,7 +6,7 @@ import { View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Alert
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
-import { exportReceiptsCsv } from '../lib/exportCsv';
+import { exportReceiptsCsv, defaultExportFilename } from '../lib/exportCsv';
 import { colors, fonts } from '../theme';
 
 export function SyncScreen() {
@@ -27,7 +27,7 @@ export function SyncScreen() {
     }
     setBusy(true);
     try {
-      const filename = `${currentEntity.id}-receipts-${new Date().toISOString().slice(0, 10)}.csv`;
+      const filename = defaultExportFilename(currentEntity.id);
       await exportReceiptsCsv(exportable, filename);
       // Mark ready receipts as synced (user has handed the data off).
       exportable.forEach(r => {
@@ -85,7 +85,7 @@ export function SyncScreen() {
                 <SummaryRow label="Total" value={`$${total.toFixed(2)} USD`} mono />
                 <SummaryRow
                   label="Filename"
-                  value={`${currentEntity.id}-receipts-${new Date().toISOString().slice(0, 10)}.csv`}
+                  value={defaultExportFilename(currentEntity.id)}
                   small
                 />
               </View>
