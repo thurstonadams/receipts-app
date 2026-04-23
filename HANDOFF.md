@@ -1,14 +1,15 @@
 # xFix Receipts — Handoff
 
-Standalone iOS receipt-capture app for your personal accounting. **No connections to xfix-mobile or KAI AI Bench.** Receipts live on-device; export to CSV when you want to hand them off.
+iOS receipt-capture app for personal accounting. **No connections to xfix-mobile or KAI AI Bench.** Metadata and photos live on-device; metadata is also backed up to Supabase per authenticated user. Export to CSV for bookkeeping.
 
 ## Stack
 
 - **Expo SDK 54** + React Native 0.81 + TypeScript
-- **Storage:** AsyncStorage (receipt metadata) + FileSystem (photos, in app documents directory)
+- **Auth + metadata backup:** Supabase (email/password auth, `receipts` table with RLS). Anon key + URL injected at build time via `EXPO_PUBLIC_SUPABASE_*` env.
+- **Local cache:** AsyncStorage keyed by userId (`@xfix-receipts:receipts:v3:<userId>`) for fast offline launch. Photos stored in the app documents directory (not currently uploaded to cloud storage — metadata only).
 - **Camera:** `expo-camera`
 - **Export:** CSV via `expo-sharing` (opens iOS share sheet → email, Files, AirDrop, etc.)
-- **Bundle id:** `io.xmotion.xfixreceipts`
+- **Bundle id:** `com.thurstonadams.receipts`
 - **Slug / EAS project:** `xfix-receipts`
 
 ## Running it locally (Expo Go)
@@ -85,8 +86,8 @@ src/
 
 - **OCR** — no automatic extraction of vendor/total from the photo. Fields are manual. Wire up `@react-native-ml-kit/text-recognition` or a cloud OCR later if you want auto-fill.
 - **QuickBooks sync** — out of scope (standalone app). Export CSV and import to QB yourself.
-- **Cloud backup** — receipts are local-only. If you uninstall the app, your data is gone. Export regularly.
-- **Multi-device sync** — one device, one database.
+- **Photo cloud sync** — receipt metadata is backed up to Supabase, but the JPEGs themselves still live only in the device's documents directory. Restoring on a fresh install gives you the list but the photos won't render. Upload to Supabase Storage is the logical next step.
+- **Multi-device metadata sync** — works via Supabase, but there's no push (device A doesn't know when device B adds a receipt until relaunch).
 - **Date picker UI** — date is a plain text input (YYYY-MM-DD). Add `@react-native-community/datetimepicker` later for polish.
 
 ## Icons & splash screen
@@ -135,19 +136,7 @@ Icon colors already referenced in `app.json` splash:
    - User Access: Full Access
    - Copy the **Apple ID** number shown on the app page (looks like `6747XXXXXX`) — that's your `ascAppId`.
 
-5. **Update `eas.json`** with real values (currently has `REPLACE_WITH_*` placeholders):
-   ```json
-   "submit": {
-     "production": {
-       "ios": {
-         "appleId": "thurstonadams@msn.com",
-         "ascAppId": "6747XXXXXX",
-         "appleTeamId": "XXXXXXXXXX"
-       }
-     }
-   }
-   ```
-   Team ID is at <https://developer.apple.com/account> → Membership details.
+5. `eas.json` already has the real submit values wired (`appleId`, `ascAppId: 6763291103`, `appleTeamId: 57MCPFVSLL`). Team ID is at <https://developer.apple.com/account> → Membership details if you ever need to rotate it.
 
 ### Build + submit
 
@@ -177,7 +166,8 @@ Categories and payment methods are in `src/data/categories.ts`. Add your real ac
 ## Data model
 
 Receipts are stored as a JSON array under the AsyncStorage key
-`@xfix-receipts:receipts:v1`. Each receipt:
+`@xfix-receipts:receipts:v3:<userId>` (scoped to the signed-in user so
+multiple accounts on one device don't bleed into each other). Each receipt:
 
 ```ts
 {
@@ -202,7 +192,9 @@ Receipts are stored as a JSON array under the AsyncStorage key
 
 Photos are stored at `<DocumentDirectory>/receipt-photos/<id>.jpg`.
 
-To wipe everything and start fresh: uninstall the app, reinstall. Or add a "Clear all data" setting later.
+The mirrored Supabase table is `receipts` with columns named in snake_case (`user_id`, `entity_id`, `category_code`, `thumb_tone`, `photo_uri`, `created_at`, `updated_at`). RLS must be enabled and policies must scope reads/writes to `auth.uid() = user_id` — the client does not pass a `user_id` filter explicitly.
+
+To wipe everything on device and start fresh: uninstall and reinstall. The next launch will restore from Supabase (metadata only — see photo note above).
 
 ## Quick smoke test
 
