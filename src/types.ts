@@ -16,7 +16,8 @@ export interface Receipt {
   notes: string;
   status: ReceiptStatus;
   thumbTone: number; // 0-360 hue for placeholder thumb
-  photoUri?: string; // local FileSystem path if captured
+  photoUri?: string; // local FileSystem path if captured (device-only, not synced)
+  photoPath?: string; // Supabase Storage object key (<userId>/<receiptId>.jpg) if uploaded
   createdAt: number;
   updatedAt: number;
 }

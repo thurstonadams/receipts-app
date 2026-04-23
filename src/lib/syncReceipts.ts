@@ -6,6 +6,7 @@ type Row = {
   total: number; currency: string; payment: string; category: string;
   category_code: string | null; project: string | null; notes: string;
   status: string; thumb_tone: number; photo_uri: string | null;
+  photo_path: string | null;
   created_at: number; updated_at: number;
 };
 
@@ -15,7 +16,11 @@ function toRow(r: Receipt, userId: string): Row {
     date: r.date, total: r.total, currency: r.currency, payment: r.payment,
     category: r.category, category_code: r.categoryCode ?? null,
     project: r.project ?? null, notes: r.notes, status: r.status,
-    thumb_tone: r.thumbTone, photo_uri: r.photoUri ?? null,
+    thumb_tone: r.thumbTone,
+    // photo_uri is a device-local file:// path; never sync it (null in cloud).
+    // photo_path is the Supabase Storage object key and is the durable pointer.
+    photo_uri: null,
+    photo_path: r.photoPath ?? null,
     created_at: r.createdAt, updated_at: r.updatedAt,
   };
 }
@@ -27,7 +32,10 @@ function fromRow(row: Row): Receipt {
     category: row.category, categoryCode: row.category_code ?? undefined,
     project: row.project ?? undefined, notes: row.notes,
     status: row.status as Receipt['status'], thumbTone: row.thumb_tone,
-    photoUri: row.photo_uri ?? undefined,
+    // photo_uri from cloud is ignored — it'd be a stale file:// path from
+    // another device. photoPath is how we find the photo in Storage.
+    photoUri: undefined,
+    photoPath: row.photo_path ?? undefined,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
