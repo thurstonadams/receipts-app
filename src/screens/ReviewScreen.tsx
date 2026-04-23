@@ -64,6 +64,16 @@ export function ReviewScreen() {
   }
 
   const handleSave = () => {
+    // Date must be YYYY-MM-DD and parse to a real calendar day. Reject garbage
+    // so fmtDate doesn't produce "Invalid Date" downstream in reports + CSV.
+    const trimmedDate = (date || initial.date).trim();
+    const dateOk =
+      /^\d{4}-\d{2}-\d{2}$/.test(trimmedDate) &&
+      !Number.isNaN(new Date(trimmedDate + 'T00:00:00').getTime());
+    if (!dateOk) {
+      Alert.alert('Invalid date', 'Use YYYY-MM-DD format (e.g. 2026-04-24).');
+      return;
+    }
     const parsed = parseFloat(totalText.replace(/[^0-9.]/g, ''));
     const cat = CATEGORIES.find(c => c.name === category);
     const hasRequired = vendor.trim() && !isNaN(parsed) && parsed > 0;
@@ -71,7 +81,7 @@ export function ReviewScreen() {
       ...initial,
       vendor: vendor.trim(),
       total: isNaN(parsed) ? 0 : parsed,
-      date: date || initial.date,
+      date: trimmedDate,
       category,
       categoryCode: cat?.code,
       project: project || undefined,

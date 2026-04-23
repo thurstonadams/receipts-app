@@ -6,7 +6,8 @@ iOS receipt-capture app for personal accounting. **No connections to xfix-mobile
 
 - **Expo SDK 54** + React Native 0.81 + TypeScript
 - **Auth + metadata backup:** Supabase (email/password auth, `receipts` table with RLS). Anon key + URL injected at build time via `EXPO_PUBLIC_SUPABASE_*` env.
-- **Local cache:** AsyncStorage keyed by userId (`@xfix-receipts:receipts:v3:<userId>`) for fast offline launch. Photos stored in the app documents directory (not currently uploaded to cloud storage — metadata only).
+- **Local cache:** AsyncStorage keyed by userId (`@xfix-receipts:receipts:v3:<userId>`) for fast offline launch. Photos stored in the app documents directory.
+- **Photo cloud backup:** Captured JPEGs are uploaded to the private `receipts` Supabase Storage bucket under `<userId>/<receiptId>.jpg`. Bucket RLS restricts access to the owner. On a fresh install, photos are downloaded on demand via short-lived signed URLs the first time each receipt is viewed.
 - **Camera:** `expo-camera`
 - **Export:** CSV via `expo-sharing` (opens iOS share sheet → email, Files, AirDrop, etc.)
 - **Bundle id:** `com.thurstonadams.receipts`
@@ -86,7 +87,6 @@ src/
 
 - **OCR** — no automatic extraction of vendor/total from the photo. Fields are manual. Wire up `@react-native-ml-kit/text-recognition` or a cloud OCR later if you want auto-fill.
 - **QuickBooks sync** — out of scope (standalone app). Export CSV and import to QB yourself.
-- **Photo cloud sync** — receipt metadata is backed up to Supabase, but the JPEGs themselves still live only in the device's documents directory. Restoring on a fresh install gives you the list but the photos won't render. Upload to Supabase Storage is the logical next step.
 - **Multi-device metadata sync** — works via Supabase, but there's no push (device A doesn't know when device B adds a receipt until relaunch).
 - **Date picker UI** — date is a plain text input (YYYY-MM-DD). Add `@react-native-community/datetimepicker` later for polish.
 
@@ -190,9 +190,9 @@ multiple accounts on one device don't bleed into each other). Each receipt:
 }
 ```
 
-Photos are stored at `<DocumentDirectory>/receipt-photos/<id>.jpg`.
+Photos are stored at `<DocumentDirectory>/receipt-photos/<id>.jpg` locally, and at `receipts/<userId>/<receiptId>.jpg` in Supabase Storage.
 
-The mirrored Supabase table is `receipts` with columns named in snake_case (`user_id`, `entity_id`, `category_code`, `thumb_tone`, `photo_uri`, `created_at`, `updated_at`). RLS must be enabled and policies must scope reads/writes to `auth.uid() = user_id` — the client does not pass a `user_id` filter explicitly.
+The mirrored Supabase table is `receipts` with columns named in snake_case (`user_id`, `entity_id`, `category_code`, `thumb_tone`, `photo_path`, `created_at`, `updated_at`). `photo_uri` is a legacy column left in place but always written as `NULL` by the client — the authoritative pointer to a cloud-backed photo is `photo_path`. RLS is enabled on both `public.receipts` and `storage.objects`, and policies scope reads/writes to `auth.uid() = user_id` (table) and `auth.uid()::text = (storage.foldername(name))[1]` (bucket).
 
 To wipe everything on device and start fresh: uninstall and reinstall. The next launch will restore from Supabase (metadata only — see photo note above).
 
