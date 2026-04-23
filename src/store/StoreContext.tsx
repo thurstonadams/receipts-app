@@ -4,7 +4,7 @@ import { Receipt, Screen } from '../types';
 import { ENTITIES } from '../data/entities';
 import { uid } from '../lib/format';
 import { deletePhoto, uploadPhotoToStorage, deletePhotoFromStorage } from '../lib/photos';
-import { pushReceipt, deleteReceiptRemote, fetchAllReceipts } from '../lib/syncReceipts';
+import { pushReceipt, deleteReceiptRemote, fetchAllReceipts, subscribeToReceipts } from '../lib/syncReceipts';
 
 // v3 keys are scoped by the authenticated user id so different accounts on the
 // same device don't bleed into each other's local cache. v2 keys (unscoped)
@@ -171,6 +171,30 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     if (!hydratedRef.current) return;
     AsyncStorage.setItem(keyReceipts(userIdRef.current), JSON.stringify(state.receipts)).catch(() => {});
   }, [state.receipts]);
+
+  // Live sync via Supabase Realtime. Any receipts row touched by another
+  // device (or this one — self-echo) fires through here. We dedupe against
+  // updated_at so we never revert a newer local edit to an older remote one.
+  useEffect(() => {
+    if (!userId) return;
+    const unsubscribe = subscribeToReceipts(userId, change => {
+      if (change.kind === 'upsert') {
+        const incoming = change.receipt;
+        const existing = receiptsRef.current.find(r => r.id === incoming.id);
+        if (existing && existing.updatedAt >= incoming.updatedAt) return;
+        if (existing) {
+          dispatch({ type: 'UPDATE_RECEIPT', receipt: incoming });
+        } else {
+          dispatch({ type: 'ADD_RECEIPT', receipt: incoming });
+        }
+      } else if (change.kind === 'delete') {
+        if (receiptsRef.current.find(r => r.id === change.id)) {
+          dispatch({ type: 'DELETE_RECEIPT', id: change.id });
+        }
+      }
+    });
+    return unsubscribe;
+  }, [userId]);
 
   // Persist selected entity locally.
   useEffect(() => {

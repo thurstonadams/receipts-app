@@ -56,3 +56,45 @@ export async function fetchAllReceipts(): Promise<Receipt[]> {
   if (error) throw error;
   return (data ?? []).map(r => fromRow(r as Row));
 }
+
+export type RemoteChange =
+  | { kind: 'upsert'; receipt: Receipt }
+  | { kind: 'delete'; id: string };
+
+/**
+ * Subscribe to postgres_changes on receipts for a given user. Callback fires
+ * for every insert/update/delete coming in over the Supabase Realtime socket.
+ * Returns the unsubscribe function.
+ *
+ * The table must be in the supabase_realtime publication for this to work;
+ * running `alter publication supabase_realtime add table public.receipts;`
+ * once in the dashboard enables it.
+ */
+export function subscribeToReceipts(
+  userId: string,
+  onChange: (change: RemoteChange) => void,
+): () => void {
+  const channel = supabase
+    .channel(`receipts:${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'receipts',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload: { eventType: string; new: unknown; old: unknown }) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          onChange({ kind: 'upsert', receipt: fromRow(payload.new as Row) });
+        } else if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string }).id;
+          if (oldId) onChange({ kind: 'delete', id: oldId });
+        }
+      },
+    )
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
