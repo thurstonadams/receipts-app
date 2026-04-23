@@ -1,6 +1,7 @@
 node_modules/
 .expo/*
 !.expo/web
+!.expo/web/**
 dist/
 web-build/
 *.log
