@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.thurstonadams.receipts",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "NSCameraUsageDescription": "Capture photos of receipts for your expense records.",
         "NSPhotoLibraryAddUsageDescription": "Save captured receipt photos to your Photos library.",
@@ -33,13 +33,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
@@ -55,12 +50,6 @@
         "projectId": "9a4cb7a3-ac51-46a3-bd6e-e9ee2aaf9ef5"
       }
     },
-    "owner": "thurston.adams",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/9a4cb7a3-ac51-46a3-bd6e-e9ee2aaf9ef5"
-    }
+    "owner": "thurston.adams"
   }
 }
