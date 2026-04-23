@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "xFix Receipts",
+    "slug": "xfix-receipts",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "scheme": "xfixreceipts",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F2F2F7"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.thurstonadams.receipts",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture photos of receipts for your expense records.",
+        "NSPhotoLibraryAddUsageDescription": "Save captured receipt photos to your Photos library.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F2F2F7"
+      },
+      "package": "com.thurstonadams.receipts",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow xFix Receipts to access your camera to capture receipts."
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "9a4cb7a3-ac51-46a3-bd6e-e9ee2aaf9ef5"
+      }
+    },
+    "owner": "thurston.adams"
+  }
+}

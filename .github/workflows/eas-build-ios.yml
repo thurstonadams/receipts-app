@@ -1,0 +1,37 @@
+name: EAS Build iOS (Production → TestFlight)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Build profile'
+        required: false
+        default: 'production'
+
+jobs:
+  build:
+    name: Build & Submit iOS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build & auto-submit
+        run: eas build --profile ${{ github.event.inputs.profile || 'production' }} --platform ios --auto-submit --non-interactive
