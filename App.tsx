@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import type { Session } from '@supabase/supabase-js';
+import { supabase } from './src/lib/supabase';
 import { StoreProvider, useStore } from './src/store/StoreContext';
+import { AuthScreen } from './src/screens/AuthScreen';
 import { EntitySwitcher } from './src/components/EntitySwitcher';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { CaptureScreen } from './src/screens/CaptureScreen';
@@ -28,33 +31,59 @@ function Router() {
 
   return (
     <View style={{ flex: 1, backgroundColor: isDark ? '#000' : colors.bg }}>
-      {state.screen === 'home' && <HomeScreen onOpenSwitcher={() => setSwitcherOpen(true)} />}
+      {state.screen === 'home'    && <HomeScreen onOpenSwitcher={() => setSwitcherOpen(true)} />}
       {state.screen === 'capture' && <CaptureScreen />}
-      {state.screen === 'batch' && <BatchScreen />}
-      {state.screen === 'review' && <ReviewScreen />}
-      {state.screen === 'sync' && <SyncScreen />}
-      {state.screen === 'report' && <ReportScreen />}
+      {state.screen === 'batch'   && <BatchScreen />}
+      {state.screen === 'review'  && <ReviewScreen />}
+      {state.screen === 'sync'    && <SyncScreen />}
+      {state.screen === 'report'  && <ReportScreen />}
 
       <EntitySwitcher
         visible={switcherOpen}
         entities={entities}
         currentId={currentEntity.id}
-        onSelect={id => {
-          setEntity(id);
-          setSwitcherOpen(false);
-        }}
+        onSelect={id => { setEntity(id); setSwitcherOpen(false); }}
         onClose={() => setSwitcherOpen(false)}
       />
-
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </View>
   );
 }
 
 export default function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (authLoading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return (
+      <SafeAreaProvider>
+        <AuthScreen />
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
-      <StoreProvider>
+      <StoreProvider userId={session.user.id}>
         <Router />
       </StoreProvider>
     </SafeAreaProvider>
