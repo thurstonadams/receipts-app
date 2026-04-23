@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Receipt, Screen } from '../types';
 import { ENTITIES } from '../data/entities';
 import { uid } from '../lib/format';
-import { deletePhoto } from '../lib/photos';
+import { deletePhoto, uploadPhotoToStorage, deletePhotoFromStorage } from '../lib/photos';
 import { pushReceipt, deleteReceiptRemote, fetchAllReceipts } from '../lib/syncReceipts';
 
 // v3 keys are scoped by the authenticated user id so different accounts on the
@@ -188,18 +188,41 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     }
   }, []);
 
+  // Upload a captured photo to Supabase Storage in the background, then
+  // patch the receipt with the returned photoPath so the cloud copy can
+  // survive a fresh install. Fire-and-forget — a failure just marks
+  // photo:<id> pending for later retry.
+  const uploadPhoto = useCallback(async (receiptId: string, localUri: string) => {
+    try {
+      const path = await uploadPhotoToStorage(localUri, userIdRef.current, receiptId);
+      const current = receiptsRef.current.find(r => r.id === receiptId);
+      if (!current) return;
+      const updated: Receipt = { ...current, photoPath: path, updatedAt: Date.now() };
+      dispatch({ type: 'UPDATE_RECEIPT', receipt: updated });
+      pushOne(updated);
+      dispatch({ type: 'MARK_SYNCED', key: `photo:${receiptId}` });
+    } catch {
+      dispatch({ type: 'MARK_PENDING', key: `photo:${receiptId}` });
+    }
+  }, [pushOne]);
+
   const retryPendingSync = useCallback(async () => {
     const keys = [...state.pendingSync];
     for (const key of keys) {
       if (key.startsWith('del:')) {
         await removeOne(key.slice(4));
+      } else if (key.startsWith('photo:')) {
+        const receiptId = key.slice(6);
+        const r = receiptsRef.current.find(x => x.id === receiptId);
+        if (r?.photoUri) await uploadPhoto(receiptId, r.photoUri);
+        else dispatch({ type: 'MARK_SYNCED', key });
       } else {
         const r = receiptsRef.current.find(x => x.id === key);
         if (r) await pushOne(r);
         else dispatch({ type: 'MARK_SYNCED', key });
       }
     }
-  }, [state.pendingSync, pushOne, removeOne]);
+  }, [state.pendingSync, pushOne, removeOne, uploadPhoto]);
 
   const currentEntity = ENTITIES.find(e => e.id === state.entityId) ?? ENTITIES[0];
   const receiptsForEntity = state.receipts.filter(r => r.entityId === state.entityId);
@@ -219,6 +242,11 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
       const receipt: Receipt = { ...r, id: uid(), createdAt: now, updatedAt: now };
       dispatch({ type: 'ADD_RECEIPT', receipt });
       pushOne(receipt);
+      // Kick off the photo upload in the background; it'll patch the
+      // receipt with a photoPath on success and retry on failure.
+      if (receipt.photoUri && !receipt.photoPath) {
+        uploadPhoto(receipt.id, receipt.photoUri);
+      }
       return receipt;
     },
     updateReceipt: r => {
@@ -229,6 +257,11 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     deleteReceipt: async id => {
       const r = state.receipts.find(x => x.id === id);
       if (r?.photoUri) await deletePhoto(r.photoUri);
+      if (r?.photoPath) {
+        // Orphaned storage objects aren't a security issue (still user-owned,
+        // RLS-scoped) so don't block the UX on cleanup.
+        deletePhotoFromStorage(r.photoPath).catch(() => {});
+      }
       dispatch({ type: 'DELETE_RECEIPT', id });
       await removeOne(id);
     },
