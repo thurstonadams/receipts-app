@@ -27,7 +27,7 @@
     "production": {
       "ios": {
         "appleId": "thurstonadams@msn.com",
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID",
+        "ascAppId": "6763291103",
         "appleTeamId": "57MCPFVSLL"
       }
     }
