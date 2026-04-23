@@ -56,4 +56,5 @@ export type Screen =
   | 'batch'
   | 'review'
   | 'sync'
-  | 'report';
+  | 'report'
+  | 'search';

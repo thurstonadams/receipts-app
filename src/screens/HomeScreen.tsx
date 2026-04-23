@@ -90,7 +90,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
             <Text style={styles.title}>{currentEntity.short === 'Personal' ? 'Personal' : currentEntity.short}</Text>
           </View>
           <View style={styles.titleIcons}>
-            <IconBtn icon="search" />
+            <IconBtn icon="search" onPress={() => navigate('search')} />
             <IconBtn icon="user" onPress={handleProfilePress} />
           </View>
         </View>

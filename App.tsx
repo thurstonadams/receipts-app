@@ -13,6 +13,7 @@ import { BatchScreen } from './src/screens/BatchScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { SyncScreen } from './src/screens/SyncScreen';
 import { ReportScreen } from './src/screens/ReportScreen';
+import { SearchScreen } from './src/screens/SearchScreen';
 import { colors } from './src/theme';
 
 function Router() {
@@ -37,6 +38,7 @@ function Router() {
       {state.screen === 'review'  && <ReviewScreen />}
       {state.screen === 'sync'    && <SyncScreen />}
       {state.screen === 'report'  && <ReportScreen />}
+      {state.screen === 'search'  && <SearchScreen />}
 
       <EntitySwitcher
         visible={switcherOpen}
