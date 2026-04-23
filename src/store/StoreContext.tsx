@@ -6,6 +6,7 @@ import { ENTITIES } from '../data/entities';
 import { uid } from '../lib/format';
 import { deletePhoto, uploadPhotoToStorage, deletePhotoFromStorage } from '../lib/photos';
 import { pushReceipt, deleteReceiptRemote, fetchAllReceipts, subscribeToReceipts } from '../lib/syncReceipts';
+import { reducer, initialState, State } from './reducer';
 
 // v3 keys are scoped by the authenticated user id so different accounts on the
 // same device don't bleed into each other's local cache. v2 keys (unscoped)
@@ -16,75 +17,6 @@ const keyReceipts = (uid: string) => `@xfix-receipts:receipts:v3:${uid}`;
 const keyEntity   = (uid: string) => `@xfix-receipts:entity:v3:${uid}`;
 const keyMigrated = (uid: string) => `@xfix-receipts:v3-migrated:${uid}`;
 
-interface State {
-  entityId: string;
-  screen: Screen;
-  currentReceiptId: string | null;
-  receipts: Receipt[];
-  ready: boolean;
-  // IDs of receipts whose most recent local write failed to reach Supabase.
-  // deleted receipts are tracked with a 'del:' prefix so we know to retry the
-  // delete rather than the upsert.
-  pendingSync: string[];
-}
-
-type Action =
-  | { type: 'HYDRATE'; receipts: Receipt[]; entityId: string }
-  | { type: 'SET_ENTITY'; id: string }
-  | { type: 'NAVIGATE'; screen: Screen; receiptId?: string | null }
-  | { type: 'ADD_RECEIPT'; receipt: Receipt }
-  | { type: 'UPDATE_RECEIPT'; receipt: Receipt }
-  | { type: 'DELETE_RECEIPT'; id: string }
-  | { type: 'REFRESH'; receipts: Receipt[] }
-  | { type: 'SET_PHOTO_URI'; id: string; uri: string }
-  | { type: 'MARK_PENDING'; key: string }
-  | { type: 'MARK_SYNCED'; key: string };
-
-const initial: State = {
-  entityId: 'xfix',
-  screen: 'home',
-  currentReceiptId: null,
-  receipts: [],
-  ready: false,
-  pendingSync: [],
-};
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'HYDRATE':
-      return { ...state, receipts: action.receipts, entityId: action.entityId, ready: true };
-    case 'SET_ENTITY':
-      return { ...state, entityId: action.id };
-    case 'NAVIGATE':
-      return {
-        ...state, screen: action.screen,
-        currentReceiptId: action.receiptId === undefined ? state.currentReceiptId : action.receiptId,
-      };
-    case 'ADD_RECEIPT':
-      return { ...state, receipts: [action.receipt, ...state.receipts] };
-    case 'UPDATE_RECEIPT':
-      return { ...state, receipts: state.receipts.map(r => r.id === action.receipt.id ? action.receipt : r) };
-    case 'DELETE_RECEIPT':
-      return { ...state, receipts: state.receipts.filter(r => r.id !== action.id) };
-    case 'REFRESH':
-      return { ...state, receipts: action.receipts };
-    case 'SET_PHOTO_URI':
-      return {
-        ...state,
-        receipts: state.receipts.map(r =>
-          r.id === action.id ? { ...r, photoUri: action.uri } : r,
-        ),
-      };
-    case 'MARK_PENDING':
-      return state.pendingSync.includes(action.key)
-        ? state
-        : { ...state, pendingSync: [...state.pendingSync, action.key] };
-    case 'MARK_SYNCED':
-      return { ...state, pendingSync: state.pendingSync.filter(k => k !== action.key) };
-    default:
-      return state;
-  }
-}
 
 interface StoreValue {
   state: State;
@@ -126,7 +58,7 @@ async function migrateV2IfNeeded(userId: string): Promise<void> {
 }
 
 export function StoreProvider({ children, userId }: { children: React.ReactNode; userId: string }) {
-  const [state, dispatch] = useReducer(reducer, initial);
+  const [state, dispatch] = useReducer(reducer, initialState);
   const hydratedRef = useRef(false);
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
