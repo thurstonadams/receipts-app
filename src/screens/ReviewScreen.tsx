@@ -14,13 +14,13 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import { PickerSheet, PickerOption } from '../components/PickerSheet';
 import { CATEGORIES, PAYMENT_METHODS, PROJECTS } from '../data/categories';
 import { fmtDateFull } from '../lib/format';
-import { colors, fonts } from '../theme';
+import { colors, fonts, statusMeta } from '../theme';
 import { Receipt } from '../types';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 
@@ -35,8 +35,8 @@ function toISODate(d: Date): string {
 
 export function ReviewScreen() {
   const { currentReceipt, updateReceipt, deleteReceipt, navigate, currentEntity } = useStore();
+  const insets = useSafeAreaInsets();
 
-  // Local draft — lets the user cancel.
   const initial: Receipt | null = currentReceipt;
   const [vendor, setVendor] = useState(initial?.vendor ?? '');
   const [totalText, setTotalText] = useState(initial ? initial.total.toFixed(2) : '0.00');
@@ -68,7 +68,7 @@ export function ReviewScreen() {
   if (!initial) {
     return (
       <SafeAreaView style={styles.rootEmpty}>
-        <Text style={styles.empty}>No receipt selected.</Text>
+        <Text style={styles.emptyText}>No receipt selected.</Text>
         <Pressable onPress={() => navigate('home')} style={styles.emptyBtn}>
           <Text style={styles.emptyBtnText}>Back to home</Text>
         </Pressable>
@@ -77,8 +77,6 @@ export function ReviewScreen() {
   }
 
   const handleSave = () => {
-    // Date must be YYYY-MM-DD and parse to a real calendar day. Reject garbage
-    // so fmtDate doesn't produce "Invalid Date" downstream in reports + CSV.
     const trimmedDate = (date || initial.date).trim();
     const dateOk =
       /^\d{4}-\d{2}-\d{2}$/.test(trimmedDate) &&
@@ -120,151 +118,163 @@ export function ReviewScreen() {
   };
 
   const isBusiness = currentEntity.id !== 'personal';
+  const statusInfo = statusMeta[initial.status] ?? statusMeta['needs-review'];
 
   return (
     <SafeAreaView edges={['top']} style={styles.root}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        {/* Nav */}
         <View style={styles.nav}>
           <Pressable style={styles.navBtn} onPress={() => navigate('home')}>
-            <Icon name="chevronLeft" size={20} color={colors.accent} />
-            <Text style={styles.navBack}>Receipts</Text>
+            <Icon name="chevronLeft" size={22} color={colors.accent} />
+            <Text style={styles.navBack}>Back</Text>
           </Pressable>
-          <Text style={styles.navTitle}>Review</Text>
-          <Pressable style={styles.navBtn} onPress={handleSave}>
-            <Text style={styles.navSave}>Save</Text>
-          </Pressable>
+          <Text style={styles.navTitle}>Edit Receipt</Text>
+          <View style={{ minWidth: 72 }} />
         </View>
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
-          {/* Photo preview */}
-          {photo.uri ? (
-            <View style={styles.photoWrap}>
-              <Image source={{ uri: photo.uri }} style={styles.photo} resizeMode="contain" />
-            </View>
-          ) : photo.loading ? (
-            <View style={styles.photoWrap}>
-              <View style={styles.noPhoto}>
-                <ActivityIndicator color={colors.accent} />
-                <Text style={styles.noPhotoText}>Restoring photo from cloud…</Text>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Photo */}
+          <View style={styles.photoCard}>
+            {photo.uri ? (
+              <Image source={{ uri: photo.uri }} style={styles.photo} resizeMode="cover" />
+            ) : photo.loading ? (
+              <View style={styles.photoPlaceholder}>
+                <ActivityIndicator color={colors.accent} size="small" />
+                <Text style={styles.photoPlaceholderText}>Loading photo…</Text>
               </View>
-            </View>
-          ) : (
-            <View style={styles.photoWrap}>
-              <View style={styles.noPhoto}>
-                <Icon name="receipt" size={36} color="rgba(60,60,67,0.4)" />
-                <Text style={styles.noPhotoText}>
-                  {initial.photoPath ? 'Photo unavailable on this device' : 'No photo — entering manually'}
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <Icon name="receipt" size={40} color="rgba(60,60,67,0.2)" />
+                <Text style={styles.photoPlaceholderText}>
+                  {initial.photoPath ? 'Photo unavailable on this device' : 'No photo attached'}
                 </Text>
               </View>
-            </View>
-          )}
+            )}
+          </View>
 
-          {/* Total hero */}
-          <View style={styles.sectionPad}>
-            <View style={styles.totalCard}>
-              <Text style={styles.label}>TOTAL</Text>
-              <View style={styles.totalRow}>
-                <Text style={[styles.totalSign, { fontFamily: fonts.sfMono }]}>$</Text>
-                <TextInput
-                  value={totalText}
-                  onChangeText={setTotalText}
-                  keyboardType="decimal-pad"
-                  selectTextOnFocus
-                  style={[styles.totalInput, { fontFamily: fonts.sfMono }]}
-                  placeholder="0.00"
-                  placeholderTextColor="rgba(60,60,67,0.3)"
-                />
-                <Text style={styles.totalCur}>USD</Text>
-              </View>
+          {/* Hero card — status + total */}
+          <View style={styles.heroCard}>
+            <View style={styles.statusPill}>
+              <View style={[styles.statusDot, { backgroundColor: '#fff' }]} />
+              <Text style={styles.statusLabel}>{statusInfo.label}</Text>
+            </View>
+            <Text style={styles.amountHint}>TOTAL AMOUNT</Text>
+            <View style={styles.amountRow}>
+              <Text style={[styles.amountCurrency, { fontFamily: fonts.sfMono }]}>$</Text>
+              <TextInput
+                value={totalText}
+                onChangeText={setTotalText}
+                keyboardType="decimal-pad"
+                selectTextOnFocus
+                style={[styles.amountInput, { fontFamily: fonts.sfMono }]}
+                placeholder="0.00"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+              />
+              <Text style={styles.amountCode}>USD</Text>
             </View>
           </View>
 
-          {/* Vendor, Date */}
-          <FieldGroup>
-            <TextField label="Vendor" value={vendor} onChangeText={setVendor} placeholder="e.g. Shell Gas Station" />
-            <PickerField
+          {/* Details */}
+          <SectionHeader title="Details" />
+          <View style={styles.group}>
+            <HRow label="Vendor" last={false}>
+              <TextInput
+                value={vendor}
+                onChangeText={setVendor}
+                placeholder="Vendor name"
+                placeholderTextColor={colors.textTertiary}
+                style={styles.rowInput}
+                textAlign="right"
+                returnKeyType="done"
+              />
+            </HRow>
+            <PickerRow
               label="Date"
               value={date ? fmtDateFull(date) : 'Select date'}
-              sub={date || undefined}
-              onPress={() => {
-                setPendingDate(parseISODate(date));
-                setDatePickerOpen(true);
-              }}
+              onPress={() => { setPendingDate(parseISODate(date)); setDatePickerOpen(true); }}
               last
             />
-          </FieldGroup>
+          </View>
 
           {/* Bookkeeping */}
-          <FieldGroup header="Bookkeeping">
-            <PickerField
+          <SectionHeader title="Bookkeeping" />
+          <View style={styles.group}>
+            <PickerRow
               label="Category"
               value={category || 'Select category'}
               sub={CATEGORIES.find(c => c.name === category)?.code}
               onPress={() => setPickerOpen('category')}
             />
             {isBusiness && (
-              <PickerField
-                label="Project / Client"
+              <PickerRow
+                label="Project"
                 value={project || 'None'}
                 onPress={() => setPickerOpen('project')}
               />
             )}
-            <PickerField
+            <PickerRow
               label="Payment"
-              value={payment || 'Select payment method'}
+              value={payment || 'Select method'}
               onPress={() => setPickerOpen('payment')}
               last
             />
-          </FieldGroup>
+          </View>
 
           {/* Notes */}
-          <FieldGroup header="Notes">
+          <SectionHeader title="Notes" />
+          <View style={styles.group}>
             <TextInput
               value={notes}
               onChangeText={setNotes}
               placeholder="Add a note for your records…"
-              placeholderTextColor="rgba(60,60,67,0.35)"
+              placeholderTextColor={colors.textTertiary}
               multiline
               style={styles.notesInput}
             />
-          </FieldGroup>
-
-          {/* Delete */}
-          <View style={[styles.sectionPad, { paddingTop: 20 }]}>
-            <Pressable onPress={handleDelete} style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.8 }]}>
-              <Text style={styles.deleteText}>Delete receipt</Text>
-            </Pressable>
           </View>
 
-          {initial.date && (
-            <Text style={styles.fullDate}>{fmtDateFull(initial.date)}</Text>
-          )}
+          <Pressable
+            onPress={handleDelete}
+            style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.55 }]}
+          >
+            <Text style={styles.deleteText}>Delete Receipt</Text>
+          </Pressable>
         </ScrollView>
+
+        {/* Sticky save bar */}
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <Pressable
+            onPress={handleSave}
+            style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.88 }]}
+          >
+            <Icon name="check" size={20} color="#fff" />
+            <Text style={styles.saveBtnText}>Save Receipt</Text>
+          </Pressable>
+        </View>
       </KeyboardAvoidingView>
 
-      <Modal
-        visible={datePickerOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setDatePickerOpen(false)}
-      >
-        <Pressable style={datePickerStyles.backdrop} onPress={() => setDatePickerOpen(false)}>
-          <Pressable style={datePickerStyles.sheet} onPress={() => { /* swallow */ }}>
-            <View style={datePickerStyles.handleRow}>
-              <View style={datePickerStyles.handle} />
+      {/* Date picker */}
+      <Modal visible={datePickerOpen} transparent animationType="slide" onRequestClose={() => setDatePickerOpen(false)}>
+        <Pressable style={pickerStyles.backdrop} onPress={() => setDatePickerOpen(false)}>
+          <Pressable style={pickerStyles.sheet} onPress={() => {}}>
+            <View style={pickerStyles.handleRow}>
+              <View style={pickerStyles.handle} />
             </View>
-            <View style={datePickerStyles.header}>
+            <View style={pickerStyles.header}>
               <Pressable onPress={() => setDatePickerOpen(false)}>
-                <Text style={datePickerStyles.cancelText}>Cancel</Text>
+                <Text style={pickerStyles.cancelText}>Cancel</Text>
               </Pressable>
-              <Text style={datePickerStyles.title}>Receipt date</Text>
-              <Pressable
-                onPress={() => {
-                  setDate(toISODate(pendingDate));
-                  setDatePickerOpen(false);
-                }}
-              >
-                <Text style={datePickerStyles.doneText}>Done</Text>
+              <Text style={pickerStyles.title}>Receipt Date</Text>
+              <Pressable onPress={() => { setDate(toISODate(pendingDate)); setDatePickerOpen(false); }}>
+                <Text style={pickerStyles.doneText}>Done</Text>
               </Pressable>
             </View>
             <DateTimePicker
@@ -274,11 +284,7 @@ export function ReviewScreen() {
               maximumDate={new Date()}
               onChange={(_e: DateTimePickerEvent, d?: Date) => {
                 if (d) setPendingDate(d);
-                if (Platform.OS !== 'ios') {
-                  // Android returns onChange with dismiss action; close + commit.
-                  setDatePickerOpen(false);
-                  if (d) setDate(toISODate(d));
-                }
+                if (Platform.OS !== 'ios') { setDatePickerOpen(false); if (d) setDate(toISODate(d)); }
               }}
               style={{ alignSelf: 'stretch' }}
             />
@@ -286,85 +292,34 @@ export function ReviewScreen() {
         </Pressable>
       </Modal>
 
-      <PickerSheet
-        visible={pickerOpen === 'category'}
-        title="Category"
-        options={categoryOptions}
-        selected={category}
-        onSelect={setCategory}
-        onClose={() => setPickerOpen(null)}
-      />
-      <PickerSheet
-        visible={pickerOpen === 'payment'}
-        title="Payment"
-        options={paymentOptions}
-        selected={payment}
-        onSelect={setPayment}
-        onClose={() => setPickerOpen(null)}
-      />
-      <PickerSheet
-        visible={pickerOpen === 'project'}
-        title="Project / Client"
-        options={projectOptions}
-        selected={project}
-        onSelect={setProject}
-        onClose={() => setPickerOpen(null)}
-      />
+      <PickerSheet visible={pickerOpen === 'category'} title="Category" options={categoryOptions} selected={category} onSelect={setCategory} onClose={() => setPickerOpen(null)} />
+      <PickerSheet visible={pickerOpen === 'payment'} title="Payment Method" options={paymentOptions} selected={payment} onSelect={setPayment} onClose={() => setPickerOpen(null)} />
+      <PickerSheet visible={pickerOpen === 'project'} title="Project / Client" options={projectOptions} selected={project} onSelect={setProject} onClose={() => setPickerOpen(null)} />
     </SafeAreaView>
   );
 }
 
-// ── Field building blocks ──────────────────────────────────
-function FieldGroup({ header, children }: { header?: string; children: React.ReactNode }) {
+function SectionHeader({ title }: { title: string }) {
+  return <Text style={styles.sectionHeader}>{title.toUpperCase()}</Text>;
+}
+
+function HRow({ label, last, children }: { label: string; last?: boolean; children: React.ReactNode }) {
   return (
-    <View style={{ marginTop: 16 }}>
-      {header && (
-        <Text style={styles.groupHeader}>{header.toUpperCase()}</Text>
-      )}
-      <View style={styles.group}>{children}</View>
+    <View style={[styles.hRow, !last && styles.rowDivider]}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={styles.rowRight}>{children}</View>
     </View>
   );
 }
 
-function TextField({
-  label, value, onChangeText, placeholder, last,
-}: {
-  label: string;
-  value: string;
-  onChangeText: (v: string) => void;
-  placeholder?: string;
-  last?: boolean;
-}) {
+function PickerRow({ label, value, sub, onPress, last }: { label: string; value: string; sub?: string; onPress: () => void; last?: boolean }) {
   return (
-    <View style={[styles.fieldRow, !last && styles.fieldDivider]}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="rgba(60,60,67,0.35)"
-        style={styles.fieldInput}
-      />
-    </View>
-  );
-}
-
-function PickerField({
-  label, value, sub, onPress, last,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  onPress: () => void;
-  last?: boolean;
-}) {
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.fieldRow, !last && styles.fieldDivider, pressed && { opacity: 0.6 }]}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.hRow, !last && styles.rowDivider, pressed && { opacity: 0.55 }]}>
+      <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.pickerRight}>
-        <Text style={styles.pickerValue} numberOfLines={1}>{value}</Text>
         {sub && <Text style={styles.pickerSub}>{sub}</Text>}
-        <Icon name="chevron" size={14} color="rgba(60,60,67,0.3)" />
+        <Text style={styles.pickerValue} numberOfLines={1}>{value}</Text>
+        <Icon name="chevron" size={15} color="rgba(60,60,67,0.28)" />
       </View>
     </Pressable>
   );
@@ -373,106 +328,76 @@ function PickerField({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   rootEmpty: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  empty: { fontSize: 15, color: 'rgba(60,60,67,0.6)', marginBottom: 16 },
-  emptyBtn: { backgroundColor: colors.accent, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12 },
-  emptyBtnText: { color: '#fff', fontWeight: '600' },
+  emptyText: { fontSize: 15, color: colors.textSecondary, marginBottom: 16 },
+  emptyBtn: { backgroundColor: colors.accent, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14 },
+  emptyBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   nav: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-    backgroundColor: colors.bg,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(60,60,67,0.08)',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 4, paddingVertical: 10, backgroundColor: colors.bg,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator,
   },
-  navBtn: { flexDirection: 'row', alignItems: 'center', padding: 8, minWidth: 80 },
-  navBack: { color: colors.accent, fontSize: 17, marginLeft: 2 },
-  navSave: { color: colors.accent, fontSize: 17, fontWeight: '600', width: '100%', textAlign: 'right' },
-  navTitle: { fontSize: 17, fontWeight: '600' },
-  photoWrap: { alignItems: 'center', paddingTop: 14 },
-  photo: { width: 200, height: 260, borderRadius: 8, backgroundColor: '#eee' },
-  noPhoto: {
-    width: 200, height: 180, borderRadius: 8, backgroundColor: '#fff',
-    borderWidth: 0.5, borderColor: 'rgba(60,60,67,0.08)',
-    alignItems: 'center', justifyContent: 'center',
+  navBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 6, minWidth: 72 },
+  navBack: { color: colors.accent, fontSize: 17, marginLeft: 1 },
+  navTitle: { fontSize: 17, fontWeight: '600', color: colors.text },
+  scroll: { paddingBottom: 20 },
+  photoCard: {
+    marginHorizontal: 16, marginTop: 16, borderRadius: 18, overflow: 'hidden',
+    backgroundColor: '#fff', height: 220,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
-  noPhotoText: { marginTop: 8, fontSize: 12, color: 'rgba(60,60,67,0.55)' },
-  sectionPad: { paddingHorizontal: 16, paddingTop: 14 },
-  totalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderWidth: 0.5,
-    borderColor: 'rgba(60,60,67,0.08)',
+  photo: { width: '100%', height: '100%' },
+  photoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  photoPlaceholderText: { fontSize: 13, color: 'rgba(60,60,67,0.4)', textAlign: 'center' },
+  heroCard: {
+    marginHorizontal: 16, marginTop: 12, backgroundColor: colors.accent,
+    borderRadius: 18, padding: 20,
+    shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 4,
   },
-  label: { fontSize: 11, fontWeight: '600', color: 'rgba(60,60,67,0.55)', letterSpacing: 0.4, marginBottom: 4 },
-  totalRow: { flexDirection: 'row', alignItems: 'baseline' },
-  totalSign: { fontSize: 22, fontWeight: '600', color: '#000', marginRight: 2 },
-  totalInput: {
-    flex: 1,
-    fontSize: 32,
-    fontWeight: '600',
-    color: '#000',
-    letterSpacing: -1,
-    padding: 0,
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.18)', gap: 5,
   },
-  totalCur: { fontSize: 14, color: 'rgba(60,60,67,0.5)', fontWeight: '500', marginLeft: 6 },
-  groupHeader: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(60,60,67,0.55)',
-    letterSpacing: 0.4,
-    paddingHorizontal: 32,
-    paddingVertical: 6,
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusLabel: { fontSize: 12, fontWeight: '600', color: '#fff', letterSpacing: 0.2 },
+  amountHint: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)', letterSpacing: 1, marginBottom: 6 },
+  amountRow: { flexDirection: 'row', alignItems: 'baseline' },
+  amountCurrency: { fontSize: 26, fontWeight: '500', color: 'rgba(255,255,255,0.7)', marginRight: 3 },
+  amountInput: { flex: 1, fontSize: 46, fontWeight: '700', color: '#fff', letterSpacing: -2, padding: 0 },
+  amountCode: { fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.55)', marginLeft: 8, marginBottom: 4 },
+  sectionHeader: {
+    fontSize: 12, fontWeight: '600', color: colors.textSecondary, letterSpacing: 0.5,
+    paddingHorizontal: 32, paddingTop: 24, paddingBottom: 8,
   },
   group: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginHorizontal: 16,
-    overflow: 'hidden',
-    borderWidth: 0.5,
-    borderColor: 'rgba(60,60,67,0.08)',
+    backgroundColor: '#fff', borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
   },
-  fieldRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    minHeight: 52,
+  hRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, minHeight: 52, paddingVertical: 10 },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
+  rowLabel: { fontSize: 15, color: colors.text, flex: 0.4 },
+  rowRight: { flex: 0.6, alignItems: 'flex-end' },
+  rowInput: { fontSize: 15, color: colors.text, textAlign: 'right', padding: 0, flex: 1 },
+  pickerRight: { flex: 0.6, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
+  pickerValue: { fontSize: 15, color: colors.textSecondary, flexShrink: 1, textAlign: 'right' },
+  pickerSub: { fontSize: 11, color: 'rgba(60,60,67,0.45)', fontFamily: fonts.sfMono },
+  notesInput: { paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: colors.text, minHeight: 90 },
+  deleteBtn: { alignSelf: 'center', marginTop: 28, paddingVertical: 8, paddingHorizontal: 16 },
+  deleteText: { fontSize: 14, color: colors.warning, fontWeight: '500' },
+  bottomBar: {
+    backgroundColor: colors.bg, paddingHorizontal: 16, paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 8,
   },
-  fieldDivider: { borderBottomWidth: 0.5, borderBottomColor: 'rgba(60,60,67,0.08)' },
-  fieldLabel: { fontSize: 11, color: 'rgba(60,60,67,0.55)', fontWeight: '500', marginBottom: 3 },
-  fieldInput: { fontSize: 16, color: '#000', padding: 0 },
-  pickerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  saveBtn: {
+    backgroundColor: colors.accent, borderRadius: 16, paddingVertical: 17,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 4,
   },
-  pickerValue: { fontSize: 16, color: '#000', flex: 1 },
-  pickerSub: { fontSize: 11, color: 'rgba(60,60,67,0.5)', fontFamily: fonts.sfMono },
-  notesInput: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#000',
-    minHeight: 80,
-  },
-  deleteBtn: {
-    backgroundColor: 'rgba(194,91,58,0.08)',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  deleteText: { fontSize: 15, fontWeight: '600', color: colors.warning },
-  fullDate: {
-    fontSize: 12,
-    color: 'rgba(60,60,67,0.5)',
-    textAlign: 'center',
-    marginTop: 10,
-  },
+  saveBtnText: { color: '#fff', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
 });
 
-const datePickerStyles = StyleSheet.create({
+const pickerStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
