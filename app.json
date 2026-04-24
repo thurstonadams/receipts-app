@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.thurstonadams.receipts",
-      "buildNumber": "8",
+      "buildNumber": "10",
       "infoPlist": {
         "NSCameraUsageDescription": "Capture photos of receipts for your expense records.",
         "NSPhotoLibraryAddUsageDescription": "Save captured receipt photos to your Photos library.",
@@ -43,7 +43,8 @@
           "cameraPermission": "Allow xFix Receipts to access your camera to capture receipts."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
