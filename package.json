@@ -8,7 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
-    "postinstall": "node -e \"const fs=require('fs');try{fs.mkdirSync('.expo/web/cache',{recursive:true,mode:0o755});}catch(e){}\""
+    "postinstall": "node -e \"const fs=require('fs');['.expo','.expo/web','.expo/web/cache','.expo/web/cache/production','.expo/web/cache/preview','.expo/web/cache/development'].forEach(d=>{try{fs.mkdirSync(d,{recursive:true,mode:0o755});fs.chmodSync(d,0o755);}catch(e){}});\""
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
