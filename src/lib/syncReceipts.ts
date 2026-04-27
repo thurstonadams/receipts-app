@@ -7,6 +7,10 @@ type Row = {
   category_code: string | null; project: string | null; notes: string;
   status: string; thumb_tone: number; photo_uri: string | null;
   photo_path: string | null;
+  source: string | null;
+  source_email: string | null;
+  source_subject: string | null;
+  attachment_path: string | null;
   created_at: number; updated_at: number;
 };
 
@@ -21,6 +25,10 @@ function toRow(r: Receipt, userId: string): Row {
     // photo_path is the Supabase Storage object key and is the durable pointer.
     photo_uri: null,
     photo_path: r.photoPath ?? null,
+    source: r.source ?? 'capture',
+    source_email: r.sourceEmail ?? null,
+    source_subject: r.sourceSubject ?? null,
+    attachment_path: r.attachmentPath ?? null,
     created_at: r.createdAt, updated_at: r.updatedAt,
   };
 }
@@ -36,6 +44,10 @@ function fromRow(row: Row): Receipt {
     // another device. photoPath is how we find the photo in Storage.
     photoUri: undefined,
     photoPath: row.photo_path ?? undefined,
+    source: (row.source === 'email' ? 'email' : 'capture'),
+    sourceEmail: row.source_email ?? undefined,
+    sourceSubject: row.source_subject ?? undefined,
+    attachmentPath: row.attachment_path ?? undefined,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }

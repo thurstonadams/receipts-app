@@ -3,8 +3,9 @@ import { Pressable, View, Text, StyleSheet } from 'react-native';
 import { Receipt } from '../types';
 import { ReceiptThumb } from './ReceiptThumb';
 import { StatusChip } from './StatusChip';
+import { Icon } from './Icon';
 import { fmtDate } from '../lib/format';
-import { fonts } from '../theme';
+import { colors, fonts } from '../theme';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 
 interface Props {
@@ -30,9 +31,14 @@ export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false,
     >
       <ReceiptThumb tone={receipt.thumbTone} size={36} photoUri={uri} />
       <View style={styles.middle}>
-        <Text style={styles.vendor} numberOfLines={1}>
-          {receipt.vendor}
-        </Text>
+        <View style={styles.vendorRow}>
+          {receipt.source === 'email' && (
+            <Icon name="mail" size={12} color={colors.textSecondary} />
+          )}
+          <Text style={styles.vendor} numberOfLines={1}>
+            {receipt.vendor}
+          </Text>
+        </View>
         <View style={styles.metaRow}>
           <Text style={styles.meta}>{fmtDate(receipt.date)}</Text>
           <View style={styles.dot} />
@@ -77,12 +83,18 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(194,91,58,0.2)',
   },
   middle: { flex: 1, minWidth: 0 },
+  vendorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 2,
+  },
   vendor: {
     fontSize: 15,
     fontWeight: '600',
     color: '#000',
     letterSpacing: -0.2,
-    marginBottom: 2,
+    flexShrink: 1,
   },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   meta: { fontSize: 12, color: 'rgba(60,60,67,0.6)', flexShrink: 1 },

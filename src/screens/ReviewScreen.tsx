@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
 } from 'react-native';
@@ -20,6 +21,7 @@ import { Icon } from '../components/Icon';
 import { PickerSheet, PickerOption } from '../components/PickerSheet';
 import { CATEGORIES, PAYMENT_METHODS, PROJECTS } from '../data/categories';
 import { fmtDateFull } from '../lib/format';
+import { supabase } from '../lib/supabase';
 import { colors, fonts, statusMeta } from '../theme';
 import { Receipt } from '../types';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
@@ -117,6 +119,23 @@ export function ReviewScreen() {
     ]);
   };
 
+  // Open the original PDF/EML/HTML attachment via a short-lived signed URL,
+  // handed off to the OS so it shows in Safari / Files / Mail.
+  const handleViewOriginal = async () => {
+    if (!initial.attachmentPath) return;
+    const { data, error } = await supabase
+      .storage
+      .from('receipt-attachments')
+      .createSignedUrl(initial.attachmentPath, 60 * 5);
+    if (error || !data?.signedUrl) {
+      Alert.alert("Couldn't open original", error?.message ?? 'No URL returned.');
+      return;
+    }
+    Linking.openURL(data.signedUrl).catch(err => {
+      Alert.alert("Couldn't open original", String(err));
+    });
+  };
+
   const isBusiness = currentEntity.id !== 'personal';
   const statusInfo = statusMeta[initial.status] ?? statusMeta['needs-review'];
 
@@ -152,13 +171,46 @@ export function ReviewScreen() {
               </View>
             ) : (
               <View style={styles.photoPlaceholder}>
-                <Icon name="receipt" size={40} color="rgba(60,60,67,0.2)" />
+                <Icon name={initial.source === 'email' ? 'mail' : 'receipt'} size={40} color="rgba(60,60,67,0.2)" />
                 <Text style={styles.photoPlaceholderText}>
-                  {initial.photoPath ? 'Photo unavailable on this device' : 'No photo attached'}
+                  {initial.source === 'email'
+                    ? 'Forwarded email'
+                    : initial.photoPath
+                      ? 'Photo unavailable on this device'
+                      : 'No photo attached'}
                 </Text>
               </View>
             )}
           </View>
+
+          {/* Source-of-truth banner for email-sourced receipts */}
+          {initial.source === 'email' && (
+            <View style={styles.emailBanner}>
+              <View style={styles.emailBannerHead}>
+                <Icon name="mail" size={14} color={colors.accent} />
+                <Text style={styles.emailBannerLabel}>FORWARDED EMAIL</Text>
+              </View>
+              {initial.sourceEmail && (
+                <Text style={styles.emailBannerLine} numberOfLines={1}>
+                  From <Text style={styles.emailBannerStrong}>{initial.sourceEmail}</Text>
+                </Text>
+              )}
+              {initial.sourceSubject && (
+                <Text style={styles.emailBannerLine} numberOfLines={2}>
+                  {initial.sourceSubject}
+                </Text>
+              )}
+              {initial.attachmentPath && (
+                <Pressable
+                  onPress={handleViewOriginal}
+                  style={({ pressed }) => [styles.viewOriginalBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Icon name="document" size={14} color={colors.accent} />
+                  <Text style={styles.viewOriginalText}>View original</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           {/* Hero card — status + total */}
           <View style={styles.heroCard}>
@@ -395,6 +447,30 @@ const styles = StyleSheet.create({
     shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 4,
   },
   saveBtnText: { color: '#fff', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
+  emailBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: 'rgba(38,72,110,0.06)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(38,72,110,0.18)',
+  },
+  emailBannerHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  emailBannerLabel: {
+    fontSize: 11, fontWeight: '600', letterSpacing: 0.5, color: colors.accent,
+  },
+  emailBannerLine: { fontSize: 13, color: colors.text, marginTop: 2 },
+  emailBannerStrong: { fontWeight: '600' },
+  viewOriginalBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start', marginTop: 8,
+    paddingVertical: 6, paddingHorizontal: 10,
+    borderRadius: 8, backgroundColor: '#fff',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(38,72,110,0.25)',
+  },
+  viewOriginalText: { fontSize: 13, color: colors.accent, fontWeight: '600' },
 });
 
 const pickerStyles = StyleSheet.create({

@@ -2,6 +2,8 @@
 
 export type ReceiptStatus = 'processing' | 'needs-review' | 'ready' | 'synced';
 
+export type ReceiptSource = 'capture' | 'email';
+
 export interface Receipt {
   id: string;
   entityId: string;
@@ -18,6 +20,10 @@ export interface Receipt {
   thumbTone: number; // 0-360 hue for placeholder thumb
   photoUri?: string; // local FileSystem path if captured (device-only, not synced)
   photoPath?: string; // Supabase Storage object key (<userId>/<receiptId>.jpg) if uploaded
+  source?: ReceiptSource; // 'capture' (default) or 'email' for inbound-email-sourced receipts
+  sourceEmail?: string;   // From: address when source='email'
+  sourceSubject?: string; // Subject line when source='email'
+  attachmentPath?: string; // receipt-attachments bucket key for the original .pdf/.eml/.html
   createdAt: number;
   updatedAt: number;
 }

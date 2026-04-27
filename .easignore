@@ -4,6 +4,7 @@ node_modules/
 !.expo/web/**
 dist/
 web-build/
+supabase/
 *.log
 .DS_Store
 .env*.local

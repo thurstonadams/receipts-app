@@ -26,6 +26,8 @@ export type IconName =
   | 'home'
   | 'send'
   | 'receipt'
+  | 'mail'
+  | 'document'
   | 'ellipsis';
 
 const map: Record<IconName, keyof typeof Ionicons.glyphMap> = {
@@ -52,6 +54,8 @@ const map: Record<IconName, keyof typeof Ionicons.glyphMap> = {
   home: 'home-outline',
   send: 'paper-plane',
   receipt: 'receipt-outline',
+  mail: 'mail-outline',
+  document: 'document-text-outline',
   ellipsis: 'ellipsis-horizontal',
 };
 
