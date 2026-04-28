@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.thurstonadams.receipts",
-      "buildNumber": "11",
+      "buildNumber": "13",
       "infoPlist": {
         "NSCameraUsageDescription": "Capture photos of receipts for your expense records.",
         "NSPhotoLibraryAddUsageDescription": "Save captured receipt photos to your Photos library.",

@@ -63,4 +63,5 @@ export type Screen =
   | 'review'
   | 'sync'
   | 'report'
-  | 'search';
+  | 'search'
+  | 'forwarding';

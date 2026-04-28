@@ -42,6 +42,10 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
       [
         { text: 'Cancel', style: 'cancel' },
         {
+          text: 'Forwarding addresses',
+          onPress: () => navigate('forwarding'),
+        },
+        {
           text: 'Sign out',
           style: 'destructive',
           onPress: () => { supabase.auth.signOut(); },
