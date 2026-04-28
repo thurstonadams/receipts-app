@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -25,8 +25,9 @@ import { useProjects } from '../lib/projects';
 import { fmtDateFull } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { colors, fonts, statusMeta } from '../theme';
-import { Receipt } from '../types';
+import { Receipt, Report } from '../types';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
+import { findReportForReceipt } from '../lib/reports';
 
 function parseISODate(iso: string): Date {
   const d = new Date(iso + 'T00:00:00');
@@ -53,6 +54,18 @@ export function ReviewScreen() {
   const [payment, setPayment] = useState(initial?.payment ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [billableToKai, setBillableToKai] = useState<boolean>(initial?.billableTo === 'kai');
+
+  // If this receipt has been included on a sent invoice, surface that link
+  // for traceability. Best-effort lookup — silent if anything fails.
+  const [billedOnReport, setBilledOnReport] = useState<Report | null>(null);
+  useEffect(() => {
+    if (!initial?.id) return;
+    let cancelled = false;
+    findReportForReceipt(initial.id)
+      .then(rep => { if (!cancelled) setBilledOnReport(rep); })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  }, [initial?.id]);
 
   const [pickerOpen, setPickerOpen] = useState<'category' | 'payment' | 'project' | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -255,6 +268,20 @@ export function ReviewScreen() {
                   <Text style={styles.viewOriginalText}>View original</Text>
                 </Pressable>
               )}
+            </View>
+          )}
+
+          {/* Billed-on backref — read-only traceability for already-invoiced receipts */}
+          {billedOnReport && (
+            <View style={styles.billedBanner}>
+              <View style={styles.billedBannerHead}>
+                <Icon name="document" size={12} color={colors.modern.greenInk} />
+                <Text style={styles.billedBannerLabel}>BILLED ON</Text>
+              </View>
+              <Text style={styles.billedBannerLine}>
+                <Text style={styles.billedBannerStrong}>{billedOnReport.id}</Text>
+                {billedOnReport.invoiceDate ? ` · sent ${billedOnReport.invoiceDate}` : ''}
+              </Text>
             </View>
           )}
 
@@ -529,6 +556,21 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(38,72,110,0.18)',
   },
+  billedBanner: {
+    marginHorizontal: 16, marginTop: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: colors.modern.greenSoft,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(5,150,105,0.2)',
+  },
+  billedBannerHead: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  billedBannerLabel: {
+    fontSize: 10, fontWeight: '500', letterSpacing: 1,
+    color: colors.modern.greenInk,
+  },
+  billedBannerLine: { fontSize: 12, color: colors.modern.greenInk, marginTop: 1 },
+  billedBannerStrong: { fontWeight: '500', fontVariant: ['tabular-nums'] },
   emailBannerHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   emailBannerLabel: {
     fontSize: 11, fontWeight: '600', letterSpacing: 0.5, color: colors.accent,
