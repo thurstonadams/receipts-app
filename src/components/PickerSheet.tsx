@@ -17,9 +17,15 @@ interface Props {
   selected?: string;
   onSelect: (value: string) => void;
   onClose: () => void;
+  /**
+   * Optional action button rendered below the list — useful for "+ New …"
+   * affordances that let the user create an option on the fly. Pressing it
+   * does NOT auto-close the sheet; the caller decides what to do next.
+   */
+  footerAction?: { label: string; onPress: () => void };
 }
 
-export function PickerSheet({ visible, title, options, selected, onSelect, onClose }: Props) {
+export function PickerSheet({ visible, title, options, selected, onSelect, onClose, footerAction }: Props) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -56,6 +62,15 @@ export function PickerSheet({ visible, title, options, selected, onSelect, onClo
                 </Pressable>
               ))}
             </View>
+            {footerAction && (
+              <Pressable
+                onPress={footerAction.onPress}
+                style={({ pressed }) => [styles.footerAction, pressed && { opacity: 0.6 }]}
+              >
+                <Icon name="plus" size={16} color={colors.accent} />
+                <Text style={styles.footerText}>{footerAction.label}</Text>
+              </Pressable>
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>
@@ -103,4 +118,18 @@ const styles = StyleSheet.create({
   divider: { borderBottomWidth: 0.5, borderBottomColor: 'rgba(60,60,67,0.08)' },
   label: { fontSize: 15, color: '#000' },
   sub: { fontSize: 12, color: 'rgba(60,60,67,0.6)', marginTop: 2 },
+  footerAction: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 0.5,
+    borderColor: 'rgba(60,60,67,0.08)',
+  },
+  footerText: { fontSize: 15, color: colors.accent, fontWeight: '600' },
 });

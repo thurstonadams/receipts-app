@@ -1,4 +1,4 @@
-import { Category, PaymentMethod, Project } from '../types';
+import { Category, PaymentMethod } from '../types';
 
 export const CATEGORIES: Category[] = [
   { name: 'Meals & Entertainment', code: '6200' },
@@ -14,16 +14,14 @@ export const CATEGORIES: Category[] = [
   { name: 'Other',                 code: '6999' },
 ];
 
-export const PROJECTS: Project[] = [
-  { id: 'p1', name: 'General — Operating' },
-  { id: 'p2', name: 'Henderson Group — Retainer' },
-  { id: 'p3', name: 'Q2 Trade Show' },
-  { id: 'p4', name: 'Internal — Ops' },
-];
-
+// Payment methods are intentionally generic — a receipt records which
+// instrument was used, not a specific card number. This keeps the picker
+// short and stable across users.
 export const PAYMENT_METHODS: PaymentMethod[] = [
-  { id: 'pm1', label: 'Visa •• 4821',       type: 'card' },
-  { id: 'pm2', label: 'Amex •• 1003',       type: 'card' },
-  { id: 'pm3', label: 'Cash',               type: 'cash' },
-  { id: 'pm4', label: 'ACH — Chase Business', type: 'ach' },
+  { id: 'pm-visa',     label: 'Visa',          type: 'card' },
+  { id: 'pm-mc',       label: 'Mastercard',    type: 'card' },
+  { id: 'pm-amex',     label: 'Amex',          type: 'card' },
+  { id: 'pm-ach',      label: 'Bank Transfer', type: 'ach'  },
+  { id: 'pm-cash',     label: 'Cash',          type: 'cash' },
+  { id: 'pm-other',    label: 'Other',         type: 'cash' },
 ];

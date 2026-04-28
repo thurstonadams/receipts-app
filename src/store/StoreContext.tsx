@@ -20,6 +20,7 @@ const keyMigrated = (uid: string) => `@xfix-receipts:v3-migrated:${uid}`;
 
 interface StoreValue {
   state: State;
+  userId: string;
   entities: typeof ENTITIES;
   currentEntity: (typeof ENTITIES)[number];
   currentReceipt: Receipt | null;
@@ -235,6 +236,7 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
 
   const value: StoreValue = {
     state,
+    userId,
     entities: ENTITIES,
     currentEntity,
     currentReceipt,

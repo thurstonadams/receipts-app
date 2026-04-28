@@ -19,7 +19,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import { PickerSheet, PickerOption } from '../components/PickerSheet';
-import { CATEGORIES, PAYMENT_METHODS, PROJECTS } from '../data/categories';
+import { CATEGORIES, PAYMENT_METHODS } from '../data/categories';
+import { useProjects } from '../lib/projects';
 import { fmtDateFull } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { colors, fonts, statusMeta } from '../theme';
@@ -36,8 +37,11 @@ function toISODate(d: Date): string {
 }
 
 export function ReviewScreen() {
-  const { currentReceipt, updateReceipt, deleteReceipt, navigate, currentEntity } = useStore();
+  const { currentReceipt, updateReceipt, deleteReceipt, navigate, currentEntity, userId } = useStore();
   const insets = useSafeAreaInsets();
+  // Per-user, per-entity custom project list. Free-text — user types their
+  // own and we persist the merged set in AsyncStorage.
+  const { projects: savedProjects, add: addProjectName } = useProjects(userId, currentEntity.id);
 
   const initial: Receipt | null = currentReceipt;
   const [vendor, setVendor] = useState(initial?.vendor ?? '');
@@ -59,13 +63,52 @@ export function ReviewScreen() {
     []
   );
   const paymentOptions: PickerOption[] = useMemo(
-    () => [...PAYMENT_METHODS.map(p => ({ value: p.label, label: p.label })), { value: 'Other', label: 'Other / cash' }],
+    () => PAYMENT_METHODS.map(p => ({ value: p.label, label: p.label })),
     []
   );
-  const projectOptions: PickerOption[] = useMemo(
-    () => [{ value: '', label: '— None —' }, ...PROJECTS.map(p => ({ value: p.name, label: p.name }))],
-    []
-  );
+  // Build the project picker list. Always lead with "— None —", then the
+  // user's saved projects for this entity. If the receipt already has a
+  // project value that isn't in the saved list (e.g. legacy data, or one
+  // that hasn't been saved yet this session), surface it too so the user
+  // can keep it selected.
+  const projectOptions: PickerOption[] = useMemo(() => {
+    const opts: PickerOption[] = [{ value: '', label: '— None —' }];
+    const seen = new Set<string>();
+    const add = (name: string) => {
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return;
+      seen.add(key);
+      opts.push({ value: name, label: name });
+    };
+    savedProjects.forEach(add);
+    if (project) add(project);
+    return opts;
+  }, [savedProjects, project]);
+
+  // Prompt the user for a new project name, save it, select it.
+  // Alert.prompt is iOS-only; on Android we'd need an inline modal but the
+  // app ships iOS-only via TestFlight so this is sufficient.
+  const handleAddProject = () => {
+    setPickerOpen(null);
+    if (Platform.OS !== 'ios') return;
+    Alert.prompt(
+      'New project',
+      'Type a project or client name to save it for this book.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          onPress: async (text?: string) => {
+            const name = (text ?? '').trim();
+            if (!name) return;
+            const saved = await addProjectName(name);
+            if (saved) setProject(saved);
+          },
+        },
+      ],
+      'plain-text',
+    );
+  };
 
   if (!initial) {
     return (
@@ -346,7 +389,15 @@ export function ReviewScreen() {
 
       <PickerSheet visible={pickerOpen === 'category'} title="Category" options={categoryOptions} selected={category} onSelect={setCategory} onClose={() => setPickerOpen(null)} />
       <PickerSheet visible={pickerOpen === 'payment'} title="Payment Method" options={paymentOptions} selected={payment} onSelect={setPayment} onClose={() => setPickerOpen(null)} />
-      <PickerSheet visible={pickerOpen === 'project'} title="Project / Client" options={projectOptions} selected={project} onSelect={setProject} onClose={() => setPickerOpen(null)} />
+      <PickerSheet
+        visible={pickerOpen === 'project'}
+        title="Project / Client"
+        options={projectOptions}
+        selected={project}
+        onSelect={setProject}
+        onClose={() => setPickerOpen(null)}
+        footerAction={{ label: 'Add new project', onPress: handleAddProject }}
+      />
     </SafeAreaView>
   );
 }
