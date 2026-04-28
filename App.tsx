@@ -15,6 +15,10 @@ import { SyncScreen } from './src/screens/SyncScreen';
 import { ReportScreen } from './src/screens/ReportScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
 import { ForwardingScreen } from './src/screens/ForwardingScreen';
+import { ReportsScreen } from './src/screens/ReportsScreen';
+import { PeriodDetailScreen } from './src/screens/PeriodDetailScreen';
+import { SendSheetScreen } from './src/screens/SendSheetScreen';
+import { OrganizeScreen } from './src/screens/OrganizeScreen';
 import { colors } from './src/theme';
 
 function Router() {
@@ -40,7 +44,11 @@ function Router() {
       {state.screen === 'sync'    && <SyncScreen />}
       {state.screen === 'report'  && <ReportScreen />}
       {state.screen === 'search'  && <SearchScreen />}
-      {state.screen === 'forwarding' && <ForwardingScreen />}
+      {state.screen === 'forwarding'    && <ForwardingScreen />}
+      {state.screen === 'reports'       && <ReportsScreen />}
+      {state.screen === 'period-detail' && <PeriodDetailScreen />}
+      {state.screen === 'send-sheet'    && <SendSheetScreen />}
+      {state.screen === 'organize'      && <OrganizeScreen />}
 
       <EntitySwitcher
         visible={switcherOpen}
