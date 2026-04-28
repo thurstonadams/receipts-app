@@ -18,5 +18,11 @@ module.exports = {
     '^expo-file-system/legacy$': '<rootDir>/__mocks__/empty.js',
     '^expo-sharing$': '<rootDir>/__mocks__/empty.js',
     '^expo-image-manipulator$': '<rootDir>/__mocks__/empty.js',
+    '^expo-print$': '<rootDir>/__mocks__/empty.js',
+    '^expo-mail-composer$': '<rootDir>/__mocks__/empty.js',
+    // Stub the supabase client for pure-logic tests that transitively
+    // import lib/reports.ts (which pulls supabase in for its network calls
+    // but exposes pure helpers we want to test).
+    '\\./supabase$': '<rootDir>/__mocks__/supabase-stub.js',
   },
 };

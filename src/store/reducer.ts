@@ -7,6 +7,7 @@ export interface State {
   entityId: string;
   screen: Screen;
   currentReceiptId: string | null;
+  currentReportId: string | null;
   receipts: Receipt[];
   ready: boolean;
   pendingSync: string[];
@@ -16,6 +17,7 @@ export type Action =
   | { type: 'HYDRATE'; receipts: Receipt[]; entityId: string }
   | { type: 'SET_ENTITY'; id: string }
   | { type: 'NAVIGATE'; screen: Screen; receiptId?: string | null }
+  | { type: 'SET_REPORT'; id: string | null }
   | { type: 'ADD_RECEIPT'; receipt: Receipt }
   | { type: 'UPDATE_RECEIPT'; receipt: Receipt }
   | { type: 'DELETE_RECEIPT'; id: string }
@@ -28,6 +30,7 @@ export const initialState: State = {
   entityId: 'xfix',
   screen: 'home',
   currentReceiptId: null,
+  currentReportId: null,
   receipts: [],
   ready: false,
   pendingSync: [],
@@ -46,6 +49,8 @@ export function reducer(state: State, action: Action): State {
         currentReceiptId:
           action.receiptId === undefined ? state.currentReceiptId : action.receiptId,
       };
+    case 'SET_REPORT':
+      return { ...state, currentReportId: action.id };
     case 'ADD_RECEIPT':
       return { ...state, receipts: [action.receipt, ...state.receipts] };
     case 'UPDATE_RECEIPT':

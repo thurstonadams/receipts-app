@@ -11,6 +11,7 @@ type Row = {
   source_email: string | null;
   source_subject: string | null;
   attachment_path: string | null;
+  billable_to: string | null;
   created_at: number; updated_at: number;
 };
 
@@ -29,6 +30,7 @@ function toRow(r: Receipt, userId: string): Row {
     source_email: r.sourceEmail ?? null,
     source_subject: r.sourceSubject ?? null,
     attachment_path: r.attachmentPath ?? null,
+    billable_to: r.billableTo ?? null,
     created_at: r.createdAt, updated_at: r.updatedAt,
   };
 }
@@ -48,6 +50,7 @@ function fromRow(row: Row): Receipt {
     sourceEmail: row.source_email ?? undefined,
     sourceSubject: row.source_subject ?? undefined,
     attachmentPath: row.attachment_path ?? undefined,
+    billableTo: row.billable_to === 'kai' ? 'kai' : null,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }

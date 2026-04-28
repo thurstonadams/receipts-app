@@ -28,6 +28,8 @@ interface StoreValue {
   unsyncedCount: number;
   setEntity: (id: string) => void;
   navigate: (screen: Screen, receiptId?: string | null) => void;
+  setCurrentReport: (id: string | null) => void;
+  openReport: (reportId: string) => void;
   addReceipt: (r: Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'>) => Receipt;
   updateReceipt: (r: Receipt) => void;
   deleteReceipt: (id: string) => Promise<void>;
@@ -244,6 +246,11 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     unsyncedCount: state.pendingSync.length,
     setEntity: id => dispatch({ type: 'SET_ENTITY', id }),
     navigate: (screen, receiptId) => dispatch({ type: 'NAVIGATE', screen, receiptId }),
+    setCurrentReport: id => dispatch({ type: 'SET_REPORT', id }),
+    openReport: reportId => {
+      dispatch({ type: 'SET_REPORT', id: reportId });
+      dispatch({ type: 'NAVIGATE', screen: 'period-detail' });
+    },
     addReceipt: r => {
       const now = Date.now();
       const receipt: Receipt = { ...r, id: uid(), createdAt: now, updatedAt: now };

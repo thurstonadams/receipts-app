@@ -42,6 +42,10 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
       [
         { text: 'Cancel', style: 'cancel' },
         {
+          text: 'KAI invoices',
+          onPress: () => navigate('reports'),
+        },
+        {
           text: 'Forwarding addresses',
           onPress: () => navigate('forwarding'),
         },

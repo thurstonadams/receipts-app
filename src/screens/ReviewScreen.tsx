@@ -13,6 +13,7 @@ import {
   Linking,
   Modal,
   Platform,
+  Switch,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,6 +52,7 @@ export function ReviewScreen() {
   const [project, setProject] = useState(initial?.project ?? '');
   const [payment, setPayment] = useState(initial?.payment ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [billableToKai, setBillableToKai] = useState<boolean>(initial?.billableTo === 'kai');
 
   const [pickerOpen, setPickerOpen] = useState<'category' | 'payment' | 'project' | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -143,6 +145,7 @@ export function ReviewScreen() {
       project: project || undefined,
       payment,
       notes,
+      billableTo: billableToKai ? 'kai' : null,
       status: hasRequired ? 'ready' : 'needs-review',
     });
     navigate('home');
@@ -323,6 +326,23 @@ export function ReviewScreen() {
             />
           </View>
 
+          {/* Billing — passthrough to KAI */}
+          <SectionHeader title="Billing" />
+          <View style={styles.group}>
+            <View style={[styles.hRow, { paddingRight: 12 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Bill to KAI</Text>
+                <Text style={styles.billHint}>Pass through on the next monthly invoice</Text>
+              </View>
+              <Switch
+                value={billableToKai}
+                onValueChange={setBillableToKai}
+                trackColor={{ true: colors.modern.brand, false: '#E4E4E7' }}
+                ios_backgroundColor="#E4E4E7"
+              />
+            </View>
+          </View>
+
           {/* Notes */}
           <SectionHeader title="Notes" />
           <View style={styles.group}>
@@ -485,6 +505,7 @@ const styles = StyleSheet.create({
   pickerValue: { fontSize: 15, color: colors.textSecondary, flexShrink: 1, textAlign: 'right' },
   pickerSub: { fontSize: 11, color: 'rgba(60,60,67,0.45)', fontFamily: fonts.sfMono },
   notesInput: { paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: colors.text, minHeight: 90 },
+  billHint: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
   deleteBtn: { alignSelf: 'center', marginTop: 28, paddingVertical: 8, paddingHorizontal: 16 },
   deleteText: { fontSize: 14, color: colors.warning, fontWeight: '500' },
   bottomBar: {
