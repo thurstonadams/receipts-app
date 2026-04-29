@@ -1,3 +1,10 @@
+// Home screen — refactored to the modern white aesthetic.
+//
+// Pure white cards on a soft page background, near-black ink, tabular
+// numerals. Same information architecture as before (entity pill, summary
+// card, Scan / Batch quick actions, Recent + Needs attention sections,
+// Reports CTA), just rendered against the modern palette so the whole app
+// feels like one product.
 import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,7 +14,8 @@ import { EntityPill } from '../components/EntityPill';
 import { Icon, IconName } from '../components/Icon';
 import { ReceiptRow } from '../components/ReceiptRow';
 import { fmtDateFull } from '../lib/format';
-import { colors, fonts } from '../theme';
+import { colors, type } from '../theme';
+import appJson from '../../app.json';
 
 type StatusFilter = null | 'synced' | 'ready' | 'needs-review';
 const FILTER_TITLES: Record<Exclude<StatusFilter, null>, string> = {
@@ -15,6 +23,9 @@ const FILTER_TITLES: Record<Exclude<StatusFilter, null>, string> = {
   ready: 'Ready',
   'needs-review': 'Needs review',
 };
+
+const BUILD_NUMBER = (appJson as { expo: { ios: { buildNumber: string } } }).expo.ios.buildNumber;
+const APP_VERSION = (appJson as { expo: { version: string } }).expo.version;
 
 export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
   const { currentEntity, receiptsForEntity, navigate, unsyncedCount, retryPendingSync, refreshFromCloud } = useStore();
@@ -38,7 +49,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
     const email = data.user?.email ?? 'this account';
     Alert.alert(
       'Account',
-      `Signed in as ${email}`,
+      `Signed in as ${email}\n\nApp version ${APP_VERSION} · Build ${BUILD_NUMBER}`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -75,14 +86,14 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
     : [];
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.modern.pageBg }}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: 80 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.accent}
+            tintColor={colors.modern.brand}
           />
         }
       >
@@ -114,7 +125,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
               <Text style={styles.syncText} numberOfLines={1}>
                 {unsyncedCount} receipt{unsyncedCount === 1 ? '' : 's'} not backed up — tap to retry
               </Text>
-              <Icon name="chevron" size={14} color={colors.warning} />
+              <Icon name="chevron" size={14} color={colors.modern.amberInk} />
             </Pressable>
           </View>
         )}
@@ -123,21 +134,21 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
         <View style={styles.sectionPad}>
           <View style={styles.card}>
             <Text style={styles.cardKicker}>
-              {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} · Unsubmitted
+              {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()} · UNSUBMITTED
             </Text>
             <View style={styles.amountRow}>
               <Text style={styles.amount}>${stats.total.toFixed(2)}</Text>
               <Text style={styles.amountSub}>across {receiptsForEntity.length} receipts</Text>
             </View>
             <View style={styles.statusBar}>
-              <View style={[styles.barSeg, { flex: Math.max(stats.synced, 0.001), backgroundColor: colors.success }]} />
-              <View style={[styles.barSeg, { flex: Math.max(stats.ready, 0.001), backgroundColor: colors.accent }]} />
-              <View style={[styles.barSeg, { flex: Math.max(stats.review, 0.001), backgroundColor: colors.warning }]} />
+              <View style={[styles.barSeg, { flex: Math.max(stats.synced, 0.001), backgroundColor: colors.modern.green }]} />
+              <View style={[styles.barSeg, { flex: Math.max(stats.ready, 0.001), backgroundColor: colors.modern.brand }]} />
+              <View style={[styles.barSeg, { flex: Math.max(stats.review, 0.001), backgroundColor: colors.modern.amber }]} />
             </View>
             <View style={styles.legend}>
-              <Legend color={colors.success} label="Synced" n={stats.synced} active={statusFilter === 'synced'} onPress={() => toggleFilter('synced')} />
-              <Legend color={colors.accent}  label="Ready"  n={stats.ready}  active={statusFilter === 'ready'}  onPress={() => toggleFilter('ready')} />
-              <Legend color={colors.warning} label="Review" n={stats.review} active={statusFilter === 'needs-review'} onPress={() => toggleFilter('needs-review')} />
+              <Legend color={colors.modern.green} label="Synced" n={stats.synced} active={statusFilter === 'synced'} onPress={() => toggleFilter('synced')} />
+              <Legend color={colors.modern.brand} label="Ready"  n={stats.ready}  active={statusFilter === 'ready'}  onPress={() => toggleFilter('ready')} />
+              <Legend color={colors.modern.amber} label="Review" n={stats.review} active={statusFilter === 'needs-review'} onPress={() => toggleFilter('needs-review')} />
             </View>
           </View>
         </View>
@@ -210,22 +221,22 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
           </>
         )}
 
-        {/* Expense report CTA */}
+        {/* KAI invoices CTA — replaces the old generic "expense report" CTA */}
         {!isPersonal && receiptsForEntity.length > 0 && (
           <View style={styles.sectionPad}>
             <Pressable
-              onPress={() => navigate('report')}
-              style={({ pressed }) => [styles.reportCta, pressed && { opacity: 0.85 }]}
+              onPress={() => navigate('reports')}
+              style={({ pressed }) => [styles.reportCta, pressed && { opacity: 0.88 }]}
             >
-              <View>
-                <Text style={styles.reportKicker}>Ready to file · {currentEntity.short}</Text>
-                <Text style={styles.reportTitle}>Review expense report</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.reportKicker}>KAI INVOICES · KALYANI → KAI</Text>
+                <Text style={styles.reportTitle}>Open Reports</Text>
                 <Text style={styles.reportSub}>
-                  {stats.synced + stats.ready} items · ${stats.total.toFixed(2)}
+                  Tag receipts as billable, assemble monthly invoice, send to KAI.
                 </Text>
               </View>
               <View style={styles.reportChev}>
-                <Icon name="chevron" size={16} color="#fff" />
+                <Icon name="chevron" size={16} color="#FFFFFF" />
               </View>
             </Pressable>
           </View>
@@ -235,12 +246,20 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
         {receiptsForEntity.length === 0 && (
           <View style={[styles.sectionPad, { paddingTop: 40, alignItems: 'center' }]}>
             <View style={styles.emptyIcon}>
-              <Icon name="receipt" size={36} color="rgba(60,60,67,0.4)" />
+              <Icon name="receipt" size={36} color={colors.modern.inkQuaternary} />
             </View>
             <Text style={styles.emptyTitle}>No receipts yet</Text>
             <Text style={styles.emptySub}>Tap Scan to capture your first one.</Text>
           </View>
         )}
+
+        {/* Build footer — visible at the bottom so any future "is this the right
+            build?" question is answered without having to dig. */}
+        <View style={styles.buildFooter}>
+          <Text style={styles.buildFooterText}>
+            Build {BUILD_NUMBER} · v{APP_VERSION}
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -249,7 +268,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
 function IconBtn({ icon, onPress }: { icon: IconName; onPress?: () => void }) {
   return (
     <Pressable style={styles.iconBtn} onPress={onPress}>
-      <Icon name={icon} size={20} color={colors.accent} />
+      <Icon name={icon} size={20} color={colors.modern.ink} />
     </Pressable>
   );
 }
@@ -296,15 +315,15 @@ function QuickAction({
       style={({ pressed }) => [
         styles.qa,
         primary ? styles.qaPrimary : styles.qaDefault,
-        pressed && { opacity: 0.8 },
+        pressed && { opacity: 0.85 },
       ]}
     >
-      <View style={[styles.qaIcon, { backgroundColor: primary ? 'rgba(255,255,255,0.12)' : 'rgba(38,72,110,0.08)' }]}>
-        <Icon name={icon} size={18} color={primary ? '#fff' : colors.accent} />
+      <View style={[styles.qaIcon, { backgroundColor: primary ? 'rgba(255,255,255,0.10)' : 'rgba(9,9,11,0.05)' }]}>
+        <Icon name={icon} size={18} color={primary ? '#FFFFFF' : colors.modern.ink} />
       </View>
       <View>
-        <Text style={[styles.qaTitle, { color: primary ? '#fff' : '#000' }]}>{title}</Text>
-        <Text style={[styles.qaSub, { color: primary ? 'rgba(255,255,255,0.65)' : 'rgba(60,60,67,0.55)' }]}>{sub}</Text>
+        <Text style={[styles.qaTitle, { color: primary ? '#FFFFFF' : colors.modern.ink }]}>{title}</Text>
+        <Text style={[styles.qaSub, { color: primary ? 'rgba(255,255,255,0.6)' : colors.modern.inkTertiary }]}>{sub}</Text>
       </View>
     </Pressable>
   );
@@ -319,39 +338,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 8,
   },
-  kicker: { fontSize: 13, color: 'rgba(60,60,67,0.6)', fontWeight: '500', letterSpacing: 0.1 },
-  title: { fontSize: 32, fontWeight: '700', letterSpacing: -0.8, color: '#000', marginTop: 2 },
-  titleIcons: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  kicker: { fontSize: 11, color: colors.modern.inkTertiary, fontWeight: '500', letterSpacing: 1, textTransform: 'uppercase' },
+  title: { fontSize: 30, fontWeight: '500', letterSpacing: -0.7, color: colors.modern.ink, marginTop: 4 },
+  titleIcons: { flexDirection: 'row', gap: 8, marginTop: 12 },
   iconBtn: {
     width: 36,
     height: 36,
     borderRadius: 99,
-    backgroundColor: 'rgba(60,60,67,0.06)',
+    backgroundColor: 'rgba(9,9,11,0.05)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   sectionPad: { paddingHorizontal: 16, paddingTop: 12 },
+
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
+    backgroundColor: colors.modern.surface,
+    borderRadius: 16,
     padding: 18,
     paddingBottom: 16,
     borderWidth: 0.5,
-    borderColor: 'rgba(60,60,67,0.08)',
+    borderColor: colors.modern.border,
   },
-  cardKicker: { fontSize: 13, color: 'rgba(60,60,67,0.6)', fontWeight: '500', marginBottom: 4 },
+  cardKicker: { ...type.eyebrow, fontSize: 10, marginBottom: 6 },
   amountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 14 },
-  amount: { fontFamily: fonts.sfMono, fontSize: 34, fontWeight: '600', letterSpacing: -1, color: '#000' },
-  amountSub: { fontSize: 13, color: 'rgba(60,60,67,0.6)' },
+  amount: { fontSize: 32, fontWeight: '500', letterSpacing: -0.8, color: colors.modern.ink, fontVariant: ['tabular-nums'] },
+  amountSub: { fontSize: 12, color: colors.modern.inkTertiary },
+
   statusBar: {
-    height: 6,
+    height: 5,
     borderRadius: 3,
     overflow: 'hidden',
     flexDirection: 'row',
-    backgroundColor: 'rgba(60,60,67,0.06)',
+    backgroundColor: 'rgba(9,9,11,0.05)',
   },
   barSeg: { height: '100%' },
-  legend: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  legend: { flexDirection: 'row', gap: 6, marginTop: 12 },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -361,30 +382,32 @@ const styles = StyleSheet.create({
     borderRadius: 99,
   },
   legendItemActive: {
-    backgroundColor: 'rgba(60,60,67,0.08)',
+    backgroundColor: 'rgba(9,9,11,0.06)',
   },
   legendDot: { width: 6, height: 6, borderRadius: 99 },
-  legendLabel: { fontSize: 12, color: 'rgba(60,60,67,0.7)' },
-  legendLabelActive: { color: '#000', fontWeight: '600' },
-  legendN: { fontSize: 12, color: 'rgba(60,60,67,0.5)' },
-  legendNActive: { color: '#000' },
+  legendLabel: { fontSize: 12, color: colors.modern.inkSecondary },
+  legendLabelActive: { color: colors.modern.ink, fontWeight: '500' },
+  legendN: { fontSize: 12, color: colors.modern.inkTertiary, fontVariant: ['tabular-nums'] },
+  legendNActive: { color: colors.modern.ink },
+
   filterEmpty: {
     paddingVertical: 20,
     textAlign: 'center',
-    color: 'rgba(60,60,67,0.55)',
+    color: colors.modern.inkTertiary,
     fontSize: 13,
   },
+
   actionsRow: { flexDirection: 'row', gap: 10 },
   qa: {
     flex: 1,
-    borderRadius: 20,
+    borderRadius: 16,
     paddingVertical: 14,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     minHeight: 96,
     justifyContent: 'space-between',
   },
-  qaDefault: { backgroundColor: '#fff', borderWidth: 0.5, borderColor: 'rgba(60,60,67,0.08)' },
-  qaPrimary: { backgroundColor: '#1C1C1E' },
+  qaDefault: { backgroundColor: colors.modern.surface, borderWidth: 0.5, borderColor: colors.modern.border },
+  qaPrimary: { backgroundColor: colors.modern.ink },
   qaIcon: {
     width: 32,
     height: 32,
@@ -393,8 +416,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 18,
   },
-  qaTitle: { fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
+  qaTitle: { fontSize: 16, fontWeight: '500', letterSpacing: -0.3 },
   qaSub: { fontSize: 12, marginTop: 1 },
+
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -403,67 +427,85 @@ const styles = StyleSheet.create({
     paddingTop: 22,
     paddingBottom: 6,
   },
-  sectionHeaderTitle: { fontSize: 13, fontWeight: '600', color: 'rgba(60,60,67,0.6)', letterSpacing: 0.2 },
-  sectionHeaderRight: { fontSize: 13, color: colors.accent, fontWeight: '500' },
+  sectionHeaderTitle: { ...type.eyebrow, fontSize: 11 },
+  sectionHeaderRight: { fontSize: 12, color: colors.modern.brand, fontWeight: '500' },
+
   embeddedList: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: colors.modern.surface,
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 0.5,
-    borderColor: 'rgba(60,60,67,0.08)',
+    borderColor: colors.modern.border,
   },
+
   reportCta: {
-    backgroundColor: colors.accent,
-    borderRadius: 20,
-    padding: 18,
-    paddingVertical: 18,
+    backgroundColor: colors.modern.ink,
+    borderRadius: 16,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  reportKicker: { fontSize: 13, opacity: 0.75, color: '#fff', fontWeight: '500', marginBottom: 2 },
-  reportTitle: { fontSize: 17, color: '#fff', fontWeight: '600', letterSpacing: -0.3 },
-  reportSub: { fontSize: 13, opacity: 0.75, color: '#fff', marginTop: 2 },
+  reportKicker: { ...type.eyebrow, fontSize: 9, color: 'rgba(255,255,255,0.55)', marginBottom: 4 },
+  reportTitle: { fontSize: 16, color: '#FFFFFF', fontWeight: '500', letterSpacing: -0.3 },
+  reportSub: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 3, lineHeight: 16 },
   reportChev: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
     borderRadius: 99,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 12,
   },
+
   emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: 'rgba(60,60,67,0.05)',
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: 'rgba(9,9,11,0.04)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  emptyTitle: { fontSize: 17, fontWeight: '600', color: '#000' },
-  emptySub: { fontSize: 13, color: 'rgba(60,60,67,0.6)', marginTop: 4 },
+  emptyTitle: { fontSize: 16, fontWeight: '500', color: colors.modern.ink, letterSpacing: -0.3 },
+  emptySub: { fontSize: 13, color: colors.modern.inkTertiary, marginTop: 4 },
+
   syncBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(194,91,58,0.10)',
+    backgroundColor: colors.modern.amberSoft,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 0.5,
-    borderColor: 'rgba(194,91,58,0.22)',
+    borderColor: 'rgba(217,119,6,0.2)',
   },
   syncDot: {
     width: 7,
     height: 7,
     borderRadius: 99,
-    backgroundColor: colors.warning,
+    backgroundColor: colors.modern.amber,
   },
   syncText: {
     flex: 1,
     fontSize: 13,
-    color: colors.warningText,
+    color: colors.modern.amberInk,
     fontWeight: '500',
+  },
+
+  buildFooter: {
+    paddingTop: 28,
+    paddingBottom: 12,
+    alignItems: 'center',
+  },
+  buildFooterText: {
+    fontSize: 10,
+    color: colors.modern.inkQuaternary,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    fontVariant: ['tabular-nums'],
   },
 });

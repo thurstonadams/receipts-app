@@ -1,3 +1,6 @@
+// Receipt row — single line item used on Home, Search, and any list view.
+//
+// Refactored to the modern white palette to match the Reports flow.
 import React from 'react';
 import { Pressable, View, Text, StyleSheet } from 'react-native';
 import { Receipt } from '../types';
@@ -5,7 +8,7 @@ import { ReceiptThumb } from './ReceiptThumb';
 import { StatusChip } from './StatusChip';
 import { Icon } from './Icon';
 import { fmtDate } from '../lib/format';
-import { colors, fonts } from '../theme';
+import { colors } from '../theme';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 
 interface Props {
@@ -33,11 +36,16 @@ export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false,
       <View style={styles.middle}>
         <View style={styles.vendorRow}>
           {receipt.source === 'email' && (
-            <Icon name="mail" size={12} color={colors.textSecondary} />
+            <Icon name="mail" size={12} color={colors.modern.inkTertiary} />
           )}
           <Text style={styles.vendor} numberOfLines={1}>
             {receipt.vendor}
           </Text>
+          {receipt.billableTo === 'kai' && (
+            <View style={styles.kaiTag}>
+              <Text style={styles.kaiTagText}>KAI</Text>
+            </View>
+          )}
         </View>
         <View style={styles.metaRow}>
           <Text style={styles.meta}>{fmtDate(receipt.date)}</Text>
@@ -64,11 +72,11 @@ const styles = StyleSheet.create({
   standalone: {
     paddingVertical: 12,
     paddingHorizontal: 14,
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: colors.modern.surface,
+    borderRadius: 14,
     marginBottom: 8,
     borderWidth: 0.5,
-    borderColor: 'rgba(60,60,67,0.08)',
+    borderColor: colors.modern.border,
   },
   embedded: {
     paddingVertical: 12,
@@ -76,35 +84,48 @@ const styles = StyleSheet.create({
   },
   divider: {
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(60,60,67,0.08)',
+    borderBottomColor: colors.modern.border,
   },
   highlight: {
-    backgroundColor: 'rgba(194,91,58,0.04)',
-    borderColor: 'rgba(194,91,58,0.2)',
+    backgroundColor: colors.modern.amberSoft,
+    borderColor: 'rgba(217,119,6,0.2)',
   },
   middle: { flex: 1, minWidth: 0 },
   vendorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     marginBottom: 2,
   },
   vendor: {
     fontSize: 15,
-    fontWeight: '600',
-    color: '#000',
+    fontWeight: '500',
+    color: colors.modern.ink,
     letterSpacing: -0.2,
     flexShrink: 1,
   },
+  kaiTag: {
+    backgroundColor: colors.modern.brand,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  kaiTagText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '500',
+    letterSpacing: 0.4,
+    fontVariant: ['tabular-nums'],
+  },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  meta: { fontSize: 12, color: 'rgba(60,60,67,0.6)', flexShrink: 1 },
-  dot: { width: 2, height: 2, borderRadius: 99, backgroundColor: 'rgba(60,60,67,0.3)' },
+  meta: { fontSize: 12, color: colors.modern.inkTertiary, flexShrink: 1 },
+  dot: { width: 2, height: 2, borderRadius: 99, backgroundColor: colors.modern.inkQuaternary },
   right: { alignItems: 'flex-end', gap: 4 },
   total: {
-    fontFamily: fonts.sfMono,
     fontSize: 15,
-    fontWeight: '600',
-    color: '#000',
+    fontWeight: '500',
+    color: colors.modern.ink,
     letterSpacing: -0.3,
+    fontVariant: ['tabular-nums'],
   },
 });
