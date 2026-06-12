@@ -28,7 +28,8 @@ export type IconName =
   | 'receipt'
   | 'mail'
   | 'document'
-  | 'ellipsis';
+  | 'ellipsis'
+  | 'lock';
 
 const map: Record<IconName, keyof typeof Ionicons.glyphMap> = {
   camera: 'camera-outline',
@@ -57,6 +58,7 @@ const map: Record<IconName, keyof typeof Ionicons.glyphMap> = {
   mail: 'mail-outline',
   document: 'document-text-outline',
   ellipsis: 'ellipsis-horizontal',
+  lock: 'lock-closed-outline',
 };
 
 interface Props {

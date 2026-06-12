@@ -12,11 +12,11 @@ import { colors, radius } from '../theme';
 function friendlyAuthError(message: string): string {
   const m = message.toLowerCase();
   if (m.includes('invalid login credentials')) return "We couldn't find an account with that email and password.";
-  if (m.includes('email not confirmed')) return 'Confirm your email first — check your inbox for the link we sent.';
+  if (m.includes('email not confirmed')) return 'Confirm your email first - check your inbox for the link we sent.';
   if (m.includes('already registered') || m.includes('user already registered')) return 'An account with that email already exists. Try signing in instead.';
   if (m.includes('password should be at least')) return 'Password needs to be at least 6 characters.';
-  if (m.includes('unable to validate email') || m.includes('valid email')) return 'That doesn\u2019t look like a valid email address.';
-  if (m.includes('network') || m.includes('fetch')) return 'Network problem — check your connection and try again.';
+  if (m.includes('unable to validate email') || m.includes('valid email')) return "That doesn't look like a valid email address.";
+  if (m.includes('network') || m.includes('fetch')) return 'Network problem - check your connection and try again.';
   if (m.includes('rate') || m.includes('too many')) return 'Too many attempts. Wait a moment and try again.';
   return message || 'Something went wrong. Try again.';
 }
@@ -80,9 +80,20 @@ export function AuthScreen() {
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      // Deep link back into the app's recovery handler in App.tsx.
+      // Scheme is defined in app.json ("xfixreceipts"). The host segment
+      // ("reset-password") is matched in App.tsx's Linking handler.
+      // NOTE: this redirect URL must also be added to the Supabase project's
+      // Auth -> URL Configuration -> Redirect URLs allow-list, otherwise the
+      // email link will silently fall back to the Site URL.
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: 'xfixreceipts://reset-password',
+      });
       if (error) Alert.alert("Couldn't send reset", friendlyAuthError(error.message));
-      else Alert.alert('Check your email', `If an account exists for ${email.trim()}, a password reset link is on its way.`);
+      else Alert.alert(
+        'Check your email',
+        `If an account exists for ${email.trim()}, a password reset link is on its way.\n\nOpen the link on this phone - it will return you to the app to set a new password.`,
+      );
     } finally {
       setLoading(false);
     }
@@ -107,7 +118,7 @@ export function AuthScreen() {
           </TouchableOpacity>
           <TouchableOpacity onPress={resendConfirmation} disabled={loading} style={{ marginTop: 16 }}>
             <Text style={s.toggle}>
-              {loading ? 'Sending\u2026' : "Didn't get it? Resend link"}
+              {loading ? 'Sending...' : "Didn't get it? Resend link"}
             </Text>
           </TouchableOpacity>
         </KeyboardAvoidingView>
