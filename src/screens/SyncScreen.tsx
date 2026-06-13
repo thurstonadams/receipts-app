@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import { exportReceiptsCsv, defaultExportFilename } from '../lib/exportCsv';
+import { fmtMoney, fmtTotalsByCurrency } from '../lib/format';
 import { colors, fonts } from '../theme';
 
 export function SyncScreen() {
@@ -18,7 +19,7 @@ export function SyncScreen() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  const total = exportable.reduce((s, r) => s + r.total, 0);
+  const totalLabel = useMemo(() => fmtTotalsByCurrency(exportable), [exportable]);
 
   const handleExport = async () => {
     if (exportable.length === 0) {
@@ -60,7 +61,7 @@ export function SyncScreen() {
             </View>
             <Text style={styles.doneTitle}>Exported</Text>
             <Text style={styles.doneSub}>
-              {exportable.length} receipt{exportable.length === 1 ? '' : 's'} · ${total.toFixed(2)}
+              {exportable.length} receipt{exportable.length === 1 ? '' : 's'} · {totalLabel}
               {'\n'}Marked as synced.
             </Text>
             <Pressable style={styles.primaryBtn} onPress={() => navigate('home')}>
@@ -82,7 +83,7 @@ export function SyncScreen() {
                 </View>
                 <View style={styles.divider} />
                 <SummaryRow label="Receipts" value={String(exportable.length)} />
-                <SummaryRow label="Total" value={`$${total.toFixed(2)} USD`} mono />
+                <SummaryRow label="Total" value={totalLabel} mono />
                 <SummaryRow
                   label="Filename"
                   value={defaultExportFilename(currentEntity.id)}
@@ -114,7 +115,7 @@ export function SyncScreen() {
                         </Text>
                       </View>
                       <Text style={[styles.rowAmt, { fontFamily: fonts.sfMono }]}>
-                        ${r.total.toFixed(2)}
+                        {fmtMoney(r.total, r.currency)}
                       </Text>
                     </View>
                   ))}

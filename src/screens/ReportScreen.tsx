@@ -5,6 +5,7 @@ import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import { ReceiptRow } from '../components/ReceiptRow';
 import { colors, fonts } from '../theme';
+import { fmtTotalsByCurrency } from '../lib/format';
 
 export function ReportScreen() {
   const { navigate, currentEntity, receiptsForEntity } = useStore();
@@ -14,12 +15,18 @@ export function ReportScreen() {
     () => receiptsForEntity.filter(r => r.status !== 'needs-review'),
     [receiptsForEntity]
   );
-  const total = included.reduce((s, r) => s + r.total, 0);
+  const total = fmtTotalsByCurrency(included);
 
   const byCategory = useMemo(() => {
-    const map = new Map<string, number>();
-    included.forEach(r => map.set(r.category, (map.get(r.category) ?? 0) + r.total));
-    const arr = Array.from(map.entries()).map(([cat, amt]) => ({ cat, amt }));
+    // amt drives the relative bar widths (raw cross-currency sum — visual
+    // weight only); label is the honest per-currency breakdown.
+    const map = new Map<string, typeof included>();
+    included.forEach(r => map.set(r.category, [...(map.get(r.category) ?? []), r]));
+    const arr = Array.from(map.entries()).map(([cat, rs]) => ({
+      cat,
+      amt: rs.reduce((s, r) => s + r.total, 0),
+      label: fmtTotalsByCurrency(rs),
+    }));
     arr.sort((a, b) => b.amt - a.amt);
     return arr;
   }, [included]);
@@ -65,7 +72,7 @@ export function ReportScreen() {
           <>
             <View style={styles.summary}>
               <Text style={styles.kicker}>REPORT · {monthLabel} · {currentEntity.short.toUpperCase()}</Text>
-              <Text style={[styles.total, { fontFamily: fonts.sfMono }]}>${total.toFixed(2)}</Text>
+              <Text style={[styles.total, { fontFamily: fonts.sfMono }]} numberOfLines={1} adjustsFontSizeToFit>{total}</Text>
               <Text style={styles.sub}>
                 {included.length} receipt{included.length === 1 ? '' : 's'}
                 {dateRange ? ` · ${dateRange}` : ''}
@@ -79,7 +86,7 @@ export function ReportScreen() {
                     <View key={b.cat} style={styles.catRow}>
                       <View style={styles.catTextRow}>
                         <Text style={styles.catLabel} numberOfLines={1}>{b.cat}</Text>
-                        <Text style={[styles.catAmt, { fontFamily: fonts.sfMono }]}>${b.amt.toFixed(2)}</Text>
+                        <Text style={[styles.catAmt, { fontFamily: fonts.sfMono }]}>{b.label}</Text>
                       </View>
                       <View style={styles.catBarBg}>
                         <View style={[styles.catBar, { width: `${(b.amt / maxCat) * 100}%` }]} />

@@ -22,7 +22,7 @@ import { Icon } from '../components/Icon';
 import { PickerSheet, PickerOption } from '../components/PickerSheet';
 import { CATEGORIES, PAYMENT_METHODS } from '../data/categories';
 import { useProjects } from '../lib/projects';
-import { fmtDateFull } from '../lib/format';
+import { fmtDateFull, currencySymbol, CURRENCIES } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { colors, fonts, statusMeta } from '../theme';
 import { Receipt, Report } from '../types';
@@ -53,6 +53,7 @@ export function ReviewScreen() {
   const [project, setProject] = useState(initial?.project ?? '');
   const [payment, setPayment] = useState(initial?.payment ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [currency, setCurrency] = useState(initial?.currency ?? 'USD');
   const [billableToKai, setBillableToKai] = useState<boolean>(initial?.billableTo === 'kai');
 
   // If this receipt has been included on a sent invoice, surface that link
@@ -145,11 +146,30 @@ export function ReviewScreen() {
       Alert.alert('Invalid date', 'Use YYYY-MM-DD format (e.g. 2026-04-24).');
       return;
     }
+    // KAI passthrough invoices bill in USD. A EUR receipt on a USD invoice
+    // would silently mix currencies in the report total, so make the user
+    // choose deliberately rather than blocking.
+    if (billableToKai && currency !== 'USD') {
+      Alert.alert(
+        'EUR receipt billed to KAI?',
+        'KAI invoices total in USD. This EUR receipt would be summed into a USD invoice as-is (no conversion). Bill it anyway?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Bill anyway', style: 'destructive', onPress: () => doSave(trimmedDate, true) },
+          { text: "Save, don't bill", onPress: () => doSave(trimmedDate, false) },
+        ]
+      );
+      return;
+    }
+    doSave(trimmedDate, billableToKai);
+  };
+
+  const doSave = (trimmedDate: string, billToKai: boolean) => {
     const parsed = parseFloat(totalText.replace(/[^0-9.]/g, ''));
     const cat = CATEGORIES.find(c => c.name === category);
     const hasRequired = vendor.trim() && !isNaN(parsed) && parsed > 0;
     updateReceipt({
-      ...initial,
+      ...initial!,
       vendor: vendor.trim(),
       total: isNaN(parsed) ? 0 : parsed,
       date: trimmedDate,
@@ -158,7 +178,8 @@ export function ReviewScreen() {
       project: project || undefined,
       payment,
       notes,
-      billableTo: billableToKai ? 'kai' : null,
+      currency,
+      billableTo: billToKai ? 'kai' : null,
       status: hasRequired ? 'ready' : 'needs-review',
     });
     navigate('home');
@@ -293,7 +314,9 @@ export function ReviewScreen() {
             </View>
             <Text style={styles.amountHint}>TOTAL AMOUNT</Text>
             <View style={styles.amountRow}>
-              <Text style={[styles.amountCurrency, { fontFamily: fonts.sfMono }]}>$</Text>
+              <Text style={[styles.amountCurrency, { fontFamily: fonts.sfMono }]}>
+                {currencySymbol(currency)}
+              </Text>
               <TextInput
                 value={totalText}
                 onChangeText={setTotalText}
@@ -303,7 +326,20 @@ export function ReviewScreen() {
                 placeholder="0.00"
                 placeholderTextColor="rgba(255,255,255,0.3)"
               />
-              <Text style={styles.amountCode}>USD</Text>
+              <View style={styles.currencyToggle}>
+                {CURRENCIES.map(c => (
+                  <Pressable
+                    key={c}
+                    onPress={() => setCurrency(c)}
+                    style={[styles.currencySeg, currency === c && styles.currencySegActive]}
+                    hitSlop={6}
+                  >
+                    <Text style={[styles.currencySegText, currency === c && styles.currencySegTextActive]}>
+                      {c}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           </View>
 
@@ -514,7 +550,11 @@ const styles = StyleSheet.create({
   amountRow: { flexDirection: 'row', alignItems: 'baseline' },
   amountCurrency: { fontSize: 26, fontWeight: '500', color: 'rgba(255,255,255,0.7)', marginRight: 3 },
   amountInput: { flex: 1, fontSize: 46, fontWeight: '700', color: '#fff', letterSpacing: -2, padding: 0 },
-  amountCode: { fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.55)', marginLeft: 8, marginBottom: 4 },
+  currencyToggle: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: 8, padding: 2, marginLeft: 8, marginBottom: 6 },
+  currencySeg: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 6 },
+  currencySegActive: { backgroundColor: '#fff' },
+  currencySegText: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
+  currencySegTextActive: { color: '#1a1a1a' },
   sectionHeader: {
     fontSize: 12, fontWeight: '600', color: colors.textSecondary, letterSpacing: 0.5,
     paddingHorizontal: 32, paddingTop: 24, paddingBottom: 8,

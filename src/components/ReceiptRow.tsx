@@ -7,7 +7,7 @@ import { Receipt } from '../types';
 import { ReceiptThumb } from './ReceiptThumb';
 import { StatusChip } from './StatusChip';
 import { Icon } from './Icon';
-import { fmtDate } from '../lib/format';
+import { fmtDate, fmtMoney } from '../lib/format';
 import { colors } from '../theme';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 
@@ -56,7 +56,7 @@ export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false,
         </View>
       </View>
       <View style={styles.right}>
-        <Text style={styles.total}>${receipt.total.toFixed(2)}</Text>
+        <Text style={styles.total}>{fmtMoney(receipt.total, receipt.currency)}</Text>
         <StatusChip status={receipt.status} />
       </View>
     </Pressable>

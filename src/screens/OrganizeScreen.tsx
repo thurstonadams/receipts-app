@@ -17,6 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import { Receipt } from '../types';
+import { fmtMoney } from '../lib/format';
 import { colors, type } from '../theme';
 
 // Vendors most likely to be billable passthrough (rough first-cut). User can
@@ -112,7 +113,7 @@ export function OrganizeScreen() {
           <Text style={type.eyebrow}>Bill to KAI?</Text>
           <Text style={styles.title}>{current.vendor || 'Unknown vendor'}</Text>
           <Text style={styles.subtitle}>
-            {current.date} · ${current.total.toFixed(2)} · {current.category || 'Uncategorized'}
+            {current.date} · {fmtMoney(current.total, current.currency)} · {current.category || 'Uncategorized'}
           </Text>
           {current.notes ? (
             <Text style={styles.notes}>"{current.notes}"</Text>

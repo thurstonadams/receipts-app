@@ -13,7 +13,7 @@ import { supabase } from '../lib/supabase';
 import { EntityPill } from '../components/EntityPill';
 import { Icon, IconName } from '../components/Icon';
 import { ReceiptRow } from '../components/ReceiptRow';
-import { fmtDateFull } from '../lib/format';
+import { fmtDateFull, fmtTotalsByCurrency } from '../lib/format';
 import { colors, type } from '../theme';
 import appJson from '../../app.json';
 
@@ -70,7 +70,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
   };
 
   const stats = useMemo(() => {
-    const total = receiptsForEntity.reduce((s, r) => s + r.total, 0);
+    const total = fmtTotalsByCurrency(receiptsForEntity);
     const review = receiptsForEntity.filter(r => r.status === 'needs-review').length;
     const ready = receiptsForEntity.filter(r => r.status === 'ready').length;
     const synced = receiptsForEntity.filter(r => r.status === 'synced').length;
@@ -137,7 +137,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
               {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()} · UNSUBMITTED
             </Text>
             <View style={styles.amountRow}>
-              <Text style={styles.amount}>${stats.total.toFixed(2)}</Text>
+              <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit>{stats.total}</Text>
               <Text style={styles.amountSub}>across {receiptsForEntity.length} receipts</Text>
             </View>
             <View style={styles.statusBar}>

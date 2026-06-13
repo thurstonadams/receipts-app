@@ -1,4 +1,4 @@
-import { fmtMoney, fmtDate, fmtDateFull, todayISO, uid } from './format';
+import { fmtMoney, fmtTotalsByCurrency, fmtDate, fmtDateFull, todayISO, uid } from './format';
 
 describe('fmtMoney', () => {
   test('defaults to USD with $ prefix', () => {
@@ -14,6 +14,35 @@ describe('fmtMoney', () => {
   test('always renders two decimals', () => {
     expect(fmtMoney(0)).toBe('$0.00');
     expect(fmtMoney(9.999)).toBe('$10.00');
+  });
+});
+
+describe('fmtTotalsByCurrency', () => {
+  test('empty list renders $0.00', () => {
+    expect(fmtTotalsByCurrency([])).toBe('$0.00');
+  });
+  test('single-currency list sums into one figure', () => {
+    expect(fmtTotalsByCurrency([
+      { total: 10, currency: 'USD' },
+      { total: 2.5, currency: 'USD' },
+    ])).toBe('$12.50');
+  });
+  test('mixed currencies render as parts, USD first', () => {
+    expect(fmtTotalsByCurrency([
+      { total: 5, currency: 'EUR' },
+      { total: 10, currency: 'USD' },
+      { total: 4, currency: 'EUR' },
+    ])).toBe('$10.00 + €9.00');
+  });
+  test('missing currency is treated as USD (legacy rows)', () => {
+    expect(fmtTotalsByCurrency([
+      { total: 3 },
+      { total: 2, currency: 'USD' },
+      { total: 1, currency: 'EUR' },
+    ])).toBe('$5.00 + €1.00');
+  });
+  test('EUR-only list never shows a dollar figure', () => {
+    expect(fmtTotalsByCurrency([{ total: 7, currency: 'EUR' }])).toBe('€7.00');
   });
 });
 

@@ -1,6 +1,34 @@
+// Currencies the entry UI offers. Receipt.currency is still free text so
+// legacy/imported data with other codes keeps rendering via fmtMoney.
+export const CURRENCIES = ['USD', 'EUR'] as const;
+
+export function currencySymbol(cur: string): string {
+  return cur === 'USD' ? '$' : cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : '';
+}
+
 export function fmtMoney(n: number, cur: string = 'USD'): string {
-  const sign = cur === 'USD' ? '$' : cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : '';
-  return `${sign}${n.toFixed(2)}`;
+  return `${currencySymbol(cur)}${n.toFixed(2)}`;
+}
+
+// Sum a list of receipts per currency and render as a single line, e.g.
+// "$1234.56 + €89.00". Never converts between currencies — a mixed-currency
+// total is displayed as its parts. USD first, then EUR, then anything else
+// alphabetically. Unknown/missing currency is treated as USD (matches the
+// pre-currency-toggle data, which was all USD).
+export function fmtTotalsByCurrency(
+  items: ReadonlyArray<{ total: number; currency?: string }>
+): string {
+  const sums = new Map<string, number>();
+  for (const it of items) {
+    const cur = it.currency || 'USD';
+    sums.set(cur, (sums.get(cur) ?? 0) + it.total);
+  }
+  if (sums.size === 0) return fmtMoney(0, 'USD');
+  const order = (c: string) => (c === 'USD' ? 0 : c === 'EUR' ? 1 : 2);
+  const curs = Array.from(sums.keys()).sort(
+    (a, b) => order(a) - order(b) || a.localeCompare(b)
+  );
+  return curs.map(c => fmtMoney(sums.get(c)!, c)).join(' + ');
 }
 
 export function fmtDate(iso: string): string {
