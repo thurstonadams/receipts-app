@@ -4,38 +4,36 @@
 //   receipts@xfix.tech              -> xFix entity
 //   receipts@xmotionaxles.com       -> KAI entity
 //   receipts+personal@xfix.tech     -> Personal entity (sub-addressing)
-// into rows in public.receipts with status='needs-review'.
+// into rows in public.receipts.
+//
+// v2 (2026-09-24): extraction now goes through the shared AI reader
+// (./reader.ts): it reads the forwarded email AND its PDF/image, finds the
+// ORIGINAL merchant (never the forwarder), the charge date, the amount and
+// its currency, and files the receipt as 'ready' when everything is clear.
+// Anything unclear stays 'needs-review' with review_reason saying why.
+// If the AI call fails, the old regex path runs and the row is flagged.
 //
 // Pipeline:
 //   1. Verify shared-secret token in the URL.
-//   2. Look up the From: address in public.email_inbound_senders. Reject if
-//      not present (default-on allowlist).
-//   3. Parse the To: address — base address picks the entity, an optional
-//      "+tag" sub-address overrides it. Reject if neither resolves.
-//   4. Extract vendor from From-Name (falling back to domain), total + date
-//      from regex, and if Anthropic creds are set fall back to a Haiku call
-//      for anything regex missed.
-//   5. Auto-categorize from a small vendor → category dictionary.
-//   6. Upload any image attachment to the receipts bucket (so the existing
-//      photo_path machinery in the app renders it as a thumbnail), and any
-//      PDF / EML to a separate receipt-attachments bucket for "View original".
-//   7. Insert the row. Realtime publication already includes public.receipts
-//      so the iOS app surfaces it within ~1s without polling.
+//   2. Look up the From: address in public.email_inbound_senders (allowlist).
+//   3. Parse the To: address — base address picks the entity, "+tag" overrides.
+//   4. AI reader (fallback: regex) → vendor / date / total / currency / category.
+//   5. Upload image → receipts bucket; PDF / HTML body → receipt-attachments.
+//   6. Insert the row (+ audit row when AI filled it).
 //
 // Required Supabase secrets:
 //   INBOUND_WEBHOOK_SECRET   - shared secret matched against ?token= on the URL
-//   ANTHROPIC_API_KEY        - optional; when set, enables AI extraction fallback
-//
-// Already provided by the Supabase runtime (no need to set):
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_ROLE_KEY
+//   ANTHROPIC_API_KEY        - AI reader
+//   READER_MODEL             - optional; defaults to claude-haiku-4-5-20251001
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { extractWithClaude, decide, type Attachment } from "./reader.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const INBOUND_WEBHOOK_SECRET = Deno.env.get("INBOUND_WEBHOOK_SECRET") ?? "";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const READER_MODEL = Deno.env.get("READER_MODEL") ?? "claude-haiku-4-5-20251001";
 
 // ── Routing config ─────────────────────────────────────────────────────────
 const ENTITY_BY_ADDRESS: Record<string, string> = {
@@ -43,16 +41,13 @@ const ENTITY_BY_ADDRESS: Record<string, string> = {
   "receipts@xmotionaxles.com": "kai",
 };
 
-// Sub-addressing tags — receipts+<tag>@xfix.tech overrides the base entity.
 const TAG_TO_ENTITY: Record<string, string> = {
   "personal": "personal",
   "kai":      "kai",
   "xfix":     "xfix",
 };
 
-// ── Auto-categorize ────────────────────────────────────────────────────────
-// Vendor name (lowercased) → category + GL code. The Edge Function does a
-// substring match so "Anthropic, PBC" still matches "anthropic".
+// ── Fallback auto-categorize (only used if the AI reader fails) ────────────
 const VENDOR_CATEGORY: Record<string, { category: string; code: string }> = {
   "anthropic":     { category: "Software & Subscriptions", code: "6600" },
   "openai":        { category: "Software & Subscriptions", code: "6600" },
@@ -81,7 +76,7 @@ const VENDOR_CATEGORY: Record<string, { category: string; code: string }> = {
   "ups":           { category: "Shipping",                 code: "6310" },
   "dhl":           { category: "Shipping",                 code: "6310" },
   "staples":       { category: "Office Supplies",          code: "6300" },
-  "amazon":        { category: "Office Supplies",          code: "6300" }, // best-guess; user can re-categorize
+  "amazon":        { category: "Office Supplies",          code: "6300" },
 };
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -102,19 +97,14 @@ interface PostmarkInboundPayload {
   ToFull?: { Email: string; Name: string }[];
   Attachments?: PostmarkAttachment[];
   MessageID?: string;
-  RawEmail?: string;     // present if Postmark "Include raw email content" is on
+  RawEmail?: string;
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
-  // CORS preflight isn't necessary for Postmark but keeps tooling happy.
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders(),
-    });
+    return new Response(null, { status: 204, headers: corsHeaders() });
   }
-
   if (req.method !== "POST") {
     return new Response("method not allowed", { status: 405, headers: corsHeaders() });
   }
@@ -153,7 +143,6 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (!senderRow) {
-    // Return 200 so Postmark doesn't retry; we just drop unauthorized senders.
     console.warn(`inbound-email: rejecting unauthorized sender ${fromEmail}`);
     return new Response("dropped: sender not in allowlist", { status: 200, headers: corsHeaders() });
   }
@@ -167,33 +156,58 @@ Deno.serve(async (req: Request) => {
     return new Response("dropped: unrecognized recipient", { status: 200, headers: corsHeaders() });
   }
 
-  // 4. Vendor / total / date extraction
-  const vendor = extractVendor(fromName, fromEmail);
-  let { total, currency } = extractTotal(textBody, subject);
-  let isoDate: string | null = extractDate(textBody, subject) ?? toISODate(dateHeader);
+  // 4. Extraction — AI reader first, regex fallback.
+  const receiptId = `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  const regexVendor = extractVendor(fromName, fromEmail);
+  const regexTotal = extractTotal(textBody, subject);
+  const regexDate = extractDate(textBody, subject) ?? toISODate(dateHeader);
 
-  // 4b. Anthropic fallback for missing total
-  if (total == null && ANTHROPIC_API_KEY) {
-    try {
-      const ai = await callAnthropic(textBody, subject, vendor);
-      if (ai.total != null) total = ai.total;
-      if (!isoDate && ai.date) isoDate = ai.date;
-    } catch (e) {
-      console.warn("inbound-email: anthropic fallback failed", e);
-    }
+  const readerAttachments: Attachment[] = (payload.Attachments ?? [])
+    .filter(a => a.ContentType === "application/pdf" || /^image\/(jpeg|png|gif|webp)$/.test(a.ContentType ?? ""))
+    .slice(0, 4)
+    .map(a => ({ name: a.Name, contentType: a.ContentType, base64: a.Content }));
+
+  let fields: {
+    vendor: string; date: string; total: number; currency: string; category: string;
+    categoryCode: string; status: "ready" | "needs-review"; reviewReason: string | null; ai: boolean;
+  };
+  let aiRaw = "";
+
+  try {
+    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not set");
+    const { extraction, raw, evidence } = await extractWithClaude({
+      subject,
+      fromName,
+      fromEmail,
+      textBody: payload.TextBody ?? undefined,
+      htmlBody: payload.HtmlBody ?? undefined,
+      receivedAt: dateHeader.toISOString(),
+      attachments: readerAttachments,
+    }, { apiKey: ANTHROPIC_API_KEY, model: READER_MODEL, fetchImpl: fetch as any });
+    aiRaw = raw;
+    const d = decide(extraction, { vendor: regexVendor, date: regexDate }, evidence);
+    fields = { ...d, ai: true };
+  } catch (e) {
+    console.warn("inbound-email: AI reader failed, using regex fallback", e);
+    const cat = autoCategorize(regexVendor);
+    fields = {
+      vendor: regexVendor || "Unknown",
+      date: regexDate,
+      total: regexTotal.total ?? 0,
+      currency: regexTotal.currency || "USD",
+      category: cat?.category ?? "Other",
+      categoryCode: cat?.code ?? "6999",
+      status: "needs-review",
+      reviewReason: "AI reader unavailable, please check",
+      ai: false,
+    };
   }
 
-  // 5. Auto-categorize
-  const cat = autoCategorize(vendor);
-
-  // 6. Upload attachments
-  const receiptId = `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-
+  // 5. Upload attachments
   let photoPath: string | null = null;
   let attachmentPath: string | null = null;
-  let thumbTone = Math.floor(Math.random() * 360);
+  const thumbTone = Math.floor(Math.random() * 360);
 
-  // First image attachment becomes the receipt photo (existing photo_path machinery handles the rest).
   const imgAttachment = (payload.Attachments ?? []).find(a => a.ContentType?.startsWith("image/"));
   if (imgAttachment) {
     try {
@@ -209,7 +223,6 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // First PDF attachment goes to the receipt-attachments bucket as the audit copy.
   const pdfAttachment = (payload.Attachments ?? []).find(a => a.ContentType === "application/pdf");
   if (pdfAttachment) {
     try {
@@ -225,8 +238,6 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // If neither image nor PDF, save the raw email body as an HTML attachment so
-  // "View original" still has something to show.
   if (!attachmentPath && (payload.HtmlBody || textBody)) {
     try {
       const path = `${userId}/${receiptId}.html`;
@@ -241,22 +252,24 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // 7. Insert receipt row
+  // 6. Insert receipt row
   const now = Date.now();
-  const { error: insertErr } = await supabase.from("receipts").insert({
+  const row = {
     id: receiptId,
     user_id: userId,
     entity_id: route.entityId,
-    vendor: vendor || "Unknown",
-    date: isoDate ?? toISODate(new Date()),
-    total: total ?? 0,
-    currency: currency || "USD",
+    vendor: fields.vendor,
+    date: fields.date,
+    total: fields.total,
+    currency: fields.currency,
     payment: "",
-    category: cat?.category ?? "Other",
-    category_code: cat?.code ?? "6999",
+    category: fields.category,
+    category_code: fields.categoryCode,
     project: null,
     notes: subject,
-    status: "needs-review",
+    status: fields.status,
+    review_reason: fields.reviewReason,
+    ai_extracted: fields.ai,
     thumb_tone: thumbTone,
     photo_uri: null,
     photo_path: photoPath,
@@ -266,15 +279,25 @@ Deno.serve(async (req: Request) => {
     source_subject: subject,
     created_at: now,
     updated_at: now,
-  });
+  };
+  const { error: insertErr } = await supabase.from("receipts").insert(row);
 
   if (insertErr) {
     console.error("inbound-email: insert failed", insertErr);
     return new Response("insert failed", { status: 500, headers: corsHeaders() });
   }
 
+  if (fields.ai) {
+    const { error: auErr } = await supabase.from("receipt_ai_audit").insert({
+      receipt_id: receiptId, user_id: userId, mode: "inbound", model: READER_MODEL,
+      before: null, after: { vendor: fields.vendor, date: fields.date, total: fields.total, currency: fields.currency, category: fields.category, status: fields.status, review_reason: fields.reviewReason },
+      raw_reply: aiRaw.slice(0, 4000),
+    });
+    if (auErr) console.warn("inbound-email: audit insert failed", auErr);
+  }
+
   return new Response(
-    JSON.stringify({ ok: true, id: receiptId, entity: route.entityId, vendor }),
+    JSON.stringify({ ok: true, id: receiptId, entity: route.entityId, vendor: fields.vendor, status: fields.status }),
     { status: 200, headers: { ...corsHeaders(), "content-type": "application/json" } },
   );
 });
@@ -296,7 +319,6 @@ function parseToAddress(addr: string): { entityId: string | null; baseAddress: s
   const tag = (m[2] ?? "").toLowerCase();
   const domain = m[3];
   const baseAddress = `${local}@${domain}`;
-
   if (tag && TAG_TO_ENTITY[tag]) {
     return { entityId: TAG_TO_ENTITY[tag], baseAddress };
   }
@@ -307,11 +329,9 @@ function extractVendor(fromName: string, fromEmail: string): string {
   if (fromName && !fromName.includes("@")) {
     return cleanVendorName(fromName);
   }
-  // From email like "billing@anthropic.com" → "Anthropic"
   const domain = fromEmail.split("@")[1] ?? "";
   const head = domain.split(".")[0];
   if (head === "mail" || head === "email" || head === "noreply" || head === "no-reply") {
-    // common subdomains, fall through to the second segment
     const parts = domain.split(".");
     return cleanVendorName(parts[1] ?? head);
   }
@@ -327,7 +347,6 @@ function cleanVendorName(s: string): string {
 }
 
 function extractTotal(text: string, subject: string): { total: number | null; currency: string } {
-  // "Total: $X.XX" / "Amount paid: $X.XX" / "Total amount $X.XX"
   const patterns: RegExp[] = [
     /total\s*amount[:\s]+\$?\s*([0-9,]+\.[0-9]{2})/i,
     /amount\s*(?:paid|charged|due)[:\s]+\$?\s*([0-9,]+\.[0-9]{2})/i,
@@ -339,7 +358,6 @@ function extractTotal(text: string, subject: string): { total: number | null; cu
     const m = text.match(p);
     if (m) return { total: parseFloat(m[1].replace(/,/g, "")), currency: "USD" };
   }
-  // Look in subject as last resort: "your receipt for $25.00"
   const m3 = subject.match(/\$([0-9,]+\.[0-9]{2})/);
   if (m3) return { total: parseFloat(m3[1].replace(/,/g, "")), currency: "USD" };
   return { total: null, currency: "USD" };
@@ -347,11 +365,8 @@ function extractTotal(text: string, subject: string): { total: number | null; cu
 
 function extractDate(text: string, subject: string): string | null {
   const corpus = `${subject}\n${text}`;
-  // ISO YYYY-MM-DD
   const isoMatch = corpus.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-
-  // "April 24, 2026" / "Apr 24, 2026" / "24 Apr 2026"
   const monthNames = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
   const m1 = corpus.match(new RegExp(`\\b(${monthNames.join("|")})[a-z]*\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, "i"));
   if (m1) {
@@ -410,46 +425,4 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-interface AnthropicExtract { total: number | null; date: string | null }
-
-async function callAnthropic(textBody: string, subject: string, vendor: string): Promise<AnthropicExtract> {
-  const prompt = `Extract the total amount paid (in USD, as a plain number) and the receipt date from this email.
-Reply in strict JSON only, no prose: {"total": <number or null>, "date": "YYYY-MM-DD" or null}.
-
-Subject: ${subject}
-Vendor: ${vendor}
-
-Body (truncated):
-${textBody.slice(0, 4000)}`;
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 100,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) throw new Error(`anthropic ${res.status}`);
-  const data = await res.json();
-  const content: string = data.content?.[0]?.text ?? "";
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return { total: null, date: null };
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      total: typeof parsed.total === "number" && isFinite(parsed.total) ? parsed.total : null,
-      date: typeof parsed.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null,
-    };
-  } catch {
-    return { total: null, date: null };
-  }
 }
