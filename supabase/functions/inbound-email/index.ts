@@ -27,7 +27,7 @@
 //   READER_MODEL             - optional; defaults to claude-haiku-4-5-20251001
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { extractWithClaude, decide, type Attachment } from "./reader.ts";
+import { extractWithClaude, decide, parseForwardedFrom, htmlToText, type Attachment } from "./reader.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -189,9 +189,13 @@ Deno.serve(async (req: Request) => {
     fields = { ...d, ai: true };
   } catch (e) {
     console.warn("inbound-email: AI reader failed, using regex fallback", e);
-    const cat = autoCategorize(regexVendor);
+    // Even without AI, never file the forwarder as vendor: use the original
+    // sender from the forwarded header block when there is one.
+    const fwd = parseForwardedFrom(payload.TextBody || htmlToText(payload.HtmlBody ?? ""));
+    const fallbackVendor = fwd?.name ? cleanVendorName(fwd.name) : regexVendor;
+    const cat = autoCategorize(fallbackVendor);
     fields = {
-      vendor: regexVendor || "Unknown",
+      vendor: fallbackVendor || "Unknown",
       date: regexDate,
       total: regexTotal.total ?? 0,
       currency: regexTotal.currency || "USD",

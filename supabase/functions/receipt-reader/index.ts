@@ -11,9 +11,11 @@
 //   GET  ?action=health                       → key present + model reachable
 //   POST {"action":"dryrun","ids":[...]}       → what it WOULD write
 //   POST {"action":"apply","ids":[...]}        → write + audit
+//   POST {"action":"peek","ids":[...]}         → read-only, any row
+//   POST {"action":"vendoronly","ids":[...]}   → fix vendor only on forwarder-named rows
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
-import { extractWithClaude, decide, type Attachment, type ReaderInput } from "./reader.ts";
+import { extractWithClaude, decide, isForwarderName, type Attachment, type ReaderInput } from "./reader.ts";
 
 const READER_KEY_SHA256 = "aebcc69eda96d5ba5c5a9f4aac4f62b6cec64963944007974c080bf16290cca1";
 const DEFAULT_MODEL = Deno.env.get("READER_MODEL") ?? "claude-haiku-4-5-20251001";
@@ -67,7 +69,12 @@ Deno.serve(async (req) => {
   const results = [];
   for (const r of rows ?? []) {
     const untouched = r.status === "needs-review" && r.source === "email" && r.updated_at === r.created_at;
-    if (!untouched) { results.push({ id: r.id, skipped: "edited by user or not an email needs-review row" }); continue; }
+    // "peek" reads any row and never writes (used to review hand-edited rows).
+    // "vendoronly" fixes ONLY the vendor on rows still filed as the forwarder
+    // (e.g. hand-reviewed rows): amounts, dates and currency are left as-is.
+    const forwarderRow = isForwarderName(r.vendor);
+    if (action === "vendoronly" && !forwarderRow) { results.push({ id: r.id, skipped: "vendor is not the forwarder" }); continue; }
+    if (!untouched && action !== "peek" && action !== "vendoronly") { results.push({ id: r.id, skipped: "edited by user or not an email needs-review row" }); continue; }
     try {
       const input: ReaderInput = {
         subject: r.source_subject ?? "",
@@ -102,7 +109,21 @@ Deno.serve(async (req) => {
       };
       const before = { vendor: r.vendor, date: r.date, total: r.total, currency: r.currency, category: r.category, category_code: r.category_code, status: r.status };
 
-      if (action === "apply") {
+      if (action === "vendoronly") {
+        let vendor = d.vendor;
+        if (vendor.length > 30 && vendor.includes(" - ")) vendor = vendor.split(" - ")[0].trim();
+        if (!vendor || vendor === "Unknown" || isForwarderName(vendor)) { results.push({ id: r.id, skipped: "AI found no vendor", extraction }); continue; }
+        const { error: auErr } = await sb.from("receipt_ai_audit").insert({
+          receipt_id: r.id, user_id: r.user_id, before: { vendor: r.vendor }, after: { vendor },
+          model: `${model} (vendor-only)`, raw_reply: raw.slice(0, 4000), mode: "backfill",
+        });
+        if (auErr) throw new Error(`audit: ${auErr.message}`);
+        const { error: upErr, count } = await sb.from("receipts")
+          .update({ vendor, updated_at: Date.now() }, { count: "exact" })
+          .eq("id", r.id).eq("updated_at", r.updated_at);
+        if (upErr) throw new Error(`update: ${upErr.message}`);
+        results.push({ id: r.id, applied: count === 1, before: { vendor: r.vendor }, after: { vendor }, aiAlsoRead: after });
+      } else if (action === "apply") {
         const now = Date.now();
         const { error: auErr } = await sb.from("receipt_ai_audit").insert({
           receipt_id: r.id, user_id: r.user_id, before, after, model, raw_reply: raw.slice(0, 4000), mode: "backfill",
