@@ -1,7 +1,10 @@
-// Reports list screen — KAI passthrough invoices.
+// KAI screen — month-end reimbursables (capture side).
 //
-// Modern white dashboard:
-//   - Stat row: This period · Awaiting payment · Paid YTD · Overdue
+// The house invoice is built at month-end by the kai-monthly-invoice skill,
+// so this screen no longer shows invoice money stats (awaiting / paid /
+// overdue were app-invoice numbers, not the real invoice). It shows:
+//   - This month, per currency (never summed across currencies)
+//   - Carry-overs: KAI receipts from earlier months not on any billed period
 //   - "Periods" section: cards for each month, newest first.
 //
 // The current period (in-progress month) is computed locally from receipts
@@ -15,15 +18,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import {
-  fetchReports, periodStartFor, periodEndFor, periodLabel, reportIdFor,
-  receiptsForPeriod, totalCentsOf, computeStats, fmtCents,
+  fetchReports, fetchBilledReceiptIds, periodStartFor, periodEndFor, periodLabel, reportIdFor,
+  receiptsForPeriod, totalCentsOf, usdOnly, fmtCents,
 } from '../lib/reports';
+import { subtotalsByCurrency, fmtSubtotals, unbilledCarryOvers } from '../lib/kaiBilling';
 import { Report } from '../types';
 import { colors, type, reportStatusMeta } from '../theme';
 
 export function ReportsScreen() {
   const { state, navigate, openReport } = useStore();
   const [reports, setReports] = useState<Report[]>([]);
+  const [billedIds, setBilledIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -37,8 +42,9 @@ export function ReportsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const list = await fetchReports();
+      const [list, billed] = await Promise.all([fetchReports(), fetchBilledReceiptIds()]);
       setReports(list);
+      setBilledIds(billed);
     } catch {
       // Network hiccup: leave existing data visible.
     }
@@ -66,9 +72,18 @@ export function ReportsScreen() {
     () => receiptsForPeriod(state.receipts, 'kai', currentPeriodStart, currentPeriodEnd),
     [state.receipts, currentPeriodStart, currentPeriodEnd],
   );
+  // USD only — other currencies are shown separately, never added in.
   const currentPeriodCents = useMemo(
-    () => totalCentsOf(currentPeriodReceipts),
+    () => totalCentsOf(usdOnly(currentPeriodReceipts)),
     [currentPeriodReceipts],
+  );
+  const currentSubtotals = useMemo(
+    () => fmtSubtotals(subtotalsByCurrency(currentPeriodReceipts)),
+    [currentPeriodReceipts],
+  );
+  const carryOvers = useMemo(
+    () => (loading ? [] : unbilledCarryOvers(state.receipts, billedIds, currentPeriodStart)),
+    [loading, state.receipts, billedIds, currentPeriodStart],
   );
 
   // The current period as a virtual "Report" card. If a saved/sent report
@@ -91,11 +106,6 @@ export function ReportsScreen() {
   // Older periods: everything else from the saved list.
   const olderReports = reports.filter(r => r.id !== currentPeriodId);
 
-  const stats = useMemo(
-    () => computeStats(reports, currentPeriodCents, today),
-    [reports, currentPeriodCents, today],
-  );
-
   return (
     <SafeAreaView edges={['top']} style={styles.root}>
       <View style={styles.nav}>
@@ -103,7 +113,7 @@ export function ReportsScreen() {
           <Icon name="chevronLeft" size={20} color={colors.modern.brand} />
           <Text style={styles.navBack}>Home</Text>
         </Pressable>
-        <Text style={styles.navTitle}>Reports</Text>
+        <Text style={styles.navTitle}>KAI</Text>
         <View style={{ width: 80 }} />
       </View>
 
@@ -114,20 +124,38 @@ export function ReportsScreen() {
         }
       >
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>Reports</Text>
-          <Text style={styles.title}>KAI invoices</Text>
-          <Text style={styles.subtitle}>Kalyani → KAI · pass-through</Text>
+          <Text style={styles.eyebrow}>KAI · month-end</Text>
+          <Text style={styles.title}>Reimbursables</Text>
+          <Text style={styles.subtitle}>Tag here. The invoice is built at month-end.</Text>
         </View>
 
         {/* Stats */}
         <View style={styles.statRow}>
-          <Stat label="This period" value={fmtCents(stats.thisPeriod)} tint="ink" />
-          <Stat label="Awaiting payment" value={fmtCents(stats.awaiting)} tint="amber" />
+          <Stat label="This month" value={currentSubtotals} tint="ink" />
         </View>
         <View style={styles.statRow}>
-          <Stat label="Paid YTD" value={fmtCents(stats.paidYtd)} tint="green" />
-          <Stat label="Overdue" value={fmtCents(stats.overdue)} tint={stats.overdue > 0 ? 'red' : 'ink'} />
+          <Stat
+            label="Carry-overs"
+            value={loading ? '…' : String(carryOvers.length)}
+            tint={carryOvers.length > 0 ? 'amber' : 'ink'}
+          />
         </View>
+
+        {carryOvers.length > 0 && (
+          <View style={styles.card}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>Not billed yet</Text>
+              <Text style={styles.cardSub}>From earlier months. Bill them or untag them.</Text>
+              {carryOvers.map(r => (
+                <Pressable key={r.id} onPress={() => navigate('review', r.id)} style={{ paddingTop: 8 }}>
+                  <Text style={styles.cardSub}>
+                    {r.date} · {r.vendor || 'Unknown'} · {(r.currency || 'USD').toUpperCase()} {r.total.toFixed(2)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Organize sweep entry — surfaces only when there are unfiled receipts */}
         {state.receipts.some(r => r.billableTo === undefined) && (
@@ -153,7 +181,12 @@ export function ReportsScreen() {
           </View>
         ) : (
           <>
-            <PeriodCard report={currentCard} onPress={() => openReport(currentCard.id)} highlight />
+            <PeriodCard
+              report={currentCard}
+              amountLabel={persistedCurrent ? undefined : currentSubtotals}
+              onPress={() => openReport(currentCard.id)}
+              highlight
+            />
             {olderReports.map(r => (
               <PeriodCard key={r.id} report={r} onPress={() => openReport(r.id)} />
             ))}
@@ -183,7 +216,9 @@ function Stat({ label, value, tint }: { label: string; value: string; tint: 'ink
   );
 }
 
-function PeriodCard({ report, onPress, highlight }: { report: Report; onPress: () => void; highlight?: boolean }) {
+function PeriodCard({ report, onPress, highlight, amountLabel }: {
+  report: Report; onPress: () => void; highlight?: boolean; amountLabel?: string;
+}) {
   const meta = reportStatusMeta[report.status] ?? reportStatusMeta.draft;
   return (
     <Pressable
@@ -197,11 +232,12 @@ function PeriodCard({ report, onPress, highlight }: { report: Report; onPress: (
       <View style={{ flex: 1 }}>
         <Text style={styles.cardTitle}>{periodLabel(report.periodStart)}</Text>
         <Text style={styles.cardSub}>
-          {report.lineCount} {report.lineCount === 1 ? 'item' : 'items'} · {report.invoiceNumber}
+          {report.lineCount} {report.lineCount === 1 ? 'item' : 'items'}
+          {report.status === 'sent' || report.status === 'paid' ? ` · invoice #${report.invoiceNumber}` : ''}
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end', gap: 6 }}>
-        <Text style={styles.cardAmount}>{fmtCents(report.totalCents)}</Text>
+        <Text style={styles.cardAmount}>{amountLabel ?? fmtCents(report.totalCents)}</Text>
         <View style={[styles.pill, { backgroundColor: meta.bg }]}>
           <Text style={[styles.pillText, { color: meta.fg }]}>{meta.label}</Text>
         </View>
@@ -235,7 +271,7 @@ const styles = StyleSheet.create({
     color: colors.modern.inkTertiary, textTransform: 'uppercase',
   },
   statValue: {
-    fontSize: 19, fontWeight: '500', letterSpacing: -0.5,
+    fontSize: 17, fontWeight: '500', letterSpacing: -0.4,
     marginTop: 4,
     fontVariant: ['tabular-nums'],
   },

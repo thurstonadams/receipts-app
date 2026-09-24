@@ -28,6 +28,7 @@ import { colors, fonts, statusMeta } from '../theme';
 import { Receipt, Report } from '../types';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 import { findReportForReceipt } from '../lib/reports';
+import { kaiBillability, defaultBillToKai } from '../lib/kaiBilling';
 
 function parseISODate(iso: string): Date {
   const d = new Date(iso + 'T00:00:00');
@@ -54,7 +55,11 @@ export function ReviewScreen() {
   const [payment, setPayment] = useState(initial?.payment ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [currency, setCurrency] = useState(initial?.currency ?? 'USD');
-  const [billableToKai, setBillableToKai] = useState<boolean>(initial?.billableTo === 'kai');
+  // Untouched KAI-book receipts start as "Bill to KAI"; an explicit "no"
+  // sticks. Rule + tests live in lib/kaiBilling.ts (defaultBillToKai).
+  const [billableToKai, setBillableToKai] = useState<boolean>(
+    initial ? defaultBillToKai(initial) : false,
+  );
 
   // If this receipt has been included on a sent invoice, surface that link
   // for traceability. Best-effort lookup — silent if anything fails.
@@ -73,6 +78,9 @@ export function ReviewScreen() {
   const [pendingDate, setPendingDate] = useState<Date>(() => parseISODate(initial?.date ?? ''));
 
   const photo = useReceiptPhoto(initial);
+
+  // Ruling 2026-09-24: software subscriptions are not billable to KAI.
+  const billability = kaiBillability({ category, vendor });
 
   const categoryOptions: PickerOption[] = useMemo(
     () => CATEGORIES.map(c => ({ value: c.name, label: c.name, sub: c.code })),
@@ -146,22 +154,10 @@ export function ReviewScreen() {
       Alert.alert('Invalid date', 'Use YYYY-MM-DD format (e.g. 2026-04-24).');
       return;
     }
-    // KAI passthrough invoices bill in USD. A EUR receipt on a USD invoice
-    // would silently mix currencies in the report total, so make the user
-    // choose deliberately rather than blocking.
-    if (billableToKai && currency !== 'USD') {
-      Alert.alert(
-        'EUR receipt billed to KAI?',
-        'KAI invoices total in USD. This EUR receipt would be summed into a USD invoice as-is (no conversion). Bill it anyway?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Bill anyway', style: 'destructive', onPress: () => doSave(trimmedDate, true) },
-          { text: "Save, don't bill", onPress: () => doSave(trimmedDate, false) },
-        ]
-      );
-      return;
-    }
-    doSave(trimmedDate, billableToKai);
+    // Non-USD receipts bill normally: the month-end invoice converts them at
+    // the ECB reference rate for the charge date, and the app never adds
+    // currencies together (see lib/kaiBilling.ts). No prompt needed.
+    doSave(trimmedDate, billableToKai && billability.ok);
   };
 
   const doSave = (trimmedDate: string, billToKai: boolean) => {
@@ -395,10 +391,17 @@ export function ReviewScreen() {
             <View style={[styles.hRow, { paddingRight: 12 }]}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Bill to KAI</Text>
-                <Text style={styles.billHint}>Pass through on the next monthly invoice</Text>
+                <Text style={styles.billHint}>
+                  {!billability.ok
+                    ? billability.reason
+                    : currency !== 'USD'
+                      ? `Billed at month-end · ${currency} converted at the ECB rate`
+                      : 'Billed on the month-end invoice'}
+                </Text>
               </View>
               <Switch
-                value={billableToKai}
+                value={billableToKai && billability.ok}
+                disabled={!billability.ok}
                 onValueChange={setBillableToKai}
                 trackColor={{ true: colors.modern.brand, false: '#E4E4E7' }}
                 ios_backgroundColor="#E4E4E7"

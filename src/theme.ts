@@ -97,8 +97,8 @@ export const reportStatusMeta: Record<
   { label: string; bg: string; fg: string }
 > = {
   draft:   { label: 'Draft',   bg: 'rgba(9,9,11,0.06)',     fg: '#52525B' },
-  ready:   { label: 'Ready',   bg: colors.modern.amberSoft, fg: colors.modern.amberInk },
-  sent:    { label: 'Sent',    bg: colors.modern.blueSoft,  fg: colors.modern.blueInk  },
+  ready:   { label: 'To bill', bg: colors.modern.amberSoft, fg: colors.modern.amberInk },
+  sent:    { label: 'Billed',  bg: colors.modern.blueSoft,  fg: colors.modern.blueInk  },
   paid:    { label: 'Paid',    bg: colors.modern.greenSoft, fg: colors.modern.greenInk },
   overdue: { label: 'Overdue', bg: colors.modern.redSoft,   fg: colors.modern.redInk   },
   void:    { label: 'Void',    bg: 'rgba(9,9,11,0.06)',     fg: '#A1A1AA' },

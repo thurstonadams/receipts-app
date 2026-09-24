@@ -53,7 +53,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'KAI invoices',
+          text: 'KAI month-end',
           onPress: () => navigate('reports'),
         },
         {
@@ -221,7 +221,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
           </>
         )}
 
-        {/* KAI invoices CTA — replaces the old generic "expense report" CTA */}
+        {/* KAI month-end CTA. The invoice itself is built by the month-end skill. */}
         {!isPersonal && receiptsForEntity.length > 0 && (
           <View style={styles.sectionPad}>
             <Pressable
@@ -229,10 +229,10 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
               style={({ pressed }) => [styles.reportCta, pressed && { opacity: 0.88 }]}
             >
               <View style={{ flex: 1 }}>
-                <Text style={styles.reportKicker}>KAI INVOICES · KALYANI → KAI</Text>
-                <Text style={styles.reportTitle}>Open Reports</Text>
+                <Text style={styles.reportKicker}>KAI · MONTH-END</Text>
+                <Text style={styles.reportTitle}>KAI reimbursables</Text>
                 <Text style={styles.reportSub}>
-                  Tag receipts as billable, assemble monthly invoice, send to KAI.
+                  See this month's KAI lines, carry-overs, and what's been billed.
                 </Text>
               </View>
               <View style={styles.reportChev}>

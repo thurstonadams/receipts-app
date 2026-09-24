@@ -14,7 +14,7 @@ export interface State {
 }
 
 export type Action =
-  | { type: 'HYDRATE'; receipts: Receipt[]; entityId: string }
+  | { type: 'HYDRATE'; receipts: Receipt[]; entityId: string; pendingSync?: string[] }
   | { type: 'SET_ENTITY'; id: string }
   | { type: 'NAVIGATE'; screen: Screen; receiptId?: string | null }
   | { type: 'SET_REPORT'; id: string | null }
@@ -39,7 +39,15 @@ export const initialState: State = {
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'HYDRATE':
-      return { ...state, receipts: action.receipts, entityId: action.entityId, ready: true };
+      return {
+        ...state,
+        receipts: action.receipts,
+        entityId: action.entityId,
+        // Restore the persisted retry queue. Without it, a restart forgets
+        // which local receipts never reached Supabase and mergeRemote drops them.
+        pendingSync: action.pendingSync ?? state.pendingSync,
+        ready: true,
+      };
     case 'SET_ENTITY':
       return { ...state, entityId: action.id };
     case 'NAVIGATE':
@@ -78,4 +86,35 @@ export function reducer(state: State, action: Action): State {
     default:
       return state;
   }
+}
+
+/**
+ * Merge a full cloud fetch into local state.
+ *   - Remote rows win unless the local copy has a newer updatedAt.
+ *   - A local receipt missing from the cloud is kept ONLY if it is still in
+ *     the pending-sync queue (captured offline, never uploaded). Anything else
+ *     missing from the cloud was deleted on another device and is dropped.
+ */
+export function mergeRemote(local: Receipt[], incoming: Receipt[], pendingSync: string[]): Receipt[] {
+  const pending = new Set(pendingSync);
+  // A delete that hasn't reached the cloud yet must not bring the row back.
+  const live = incoming.filter(r => !pending.has(`del:${r.id}`));
+  const incomingIds = new Set(live.map(r => r.id));
+  const localById = new Map(local.map(r => [r.id, r]));
+  const localOnly = local.filter(r => !incomingIds.has(r.id) && pending.has(r.id));
+  const merged = live.map(r => {
+    const l = localById.get(r.id);
+    if (l && l.updatedAt > r.updatedAt) return l;
+    if (!l) return r;
+    return {
+      ...r,
+      // Cloud rows never carry photoUri (device-local path). Keep ours, or a
+      // photo whose upload is still queued can no longer be retried.
+      photoUri: r.photoUri ?? l.photoUri,
+      // The cloud stores "no decision yet" as null. Keep the local undefined
+      // so an untouched KAI-book capture still defaults to Bill to KAI.
+      billableTo: l.billableTo === undefined && r.billableTo === null ? undefined : r.billableTo,
+    };
+  });
+  return [...localOnly, ...merged];
 }
