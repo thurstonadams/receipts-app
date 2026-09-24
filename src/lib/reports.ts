@@ -13,6 +13,7 @@
 // of each receipt at billing time.
 import { Receipt, Report, ReportLine, ReportStatus } from '../types';
 import { supabase } from './supabase';
+import { isKaiBillable, subtotalsByCurrency, fmtSubtotals } from './kaiBilling';
 
 // ─── Period helpers ──────────────────────────────────────────────────────
 
@@ -51,7 +52,11 @@ export function reportIdFor(client: 'kai', periodStartIso: string): string {
 
 // ─── In-memory assembly ──────────────────────────────────────────────────
 
-/** Returns receipts tagged for `client` whose date falls within the period. */
+/**
+ * Returns receipts tagged for `client` whose date falls within the period.
+ * Receipts that fail the KAI billing rules (software — ruling 2026-09-24) are
+ * dropped even if they carry an old "Bill to KAI" tag.
+ */
 export function receiptsForPeriod(
   receipts: Receipt[],
   client: 'kai',
@@ -59,16 +64,33 @@ export function receiptsForPeriod(
   periodEndIso: string,
 ): Receipt[] {
   return receipts
-    .filter(r => r.billableTo === client && r.date >= periodStartIso && r.date <= periodEndIso)
+    .filter(r =>
+      r.billableTo === client &&
+      isKaiBillable(r) &&
+      r.date >= periodStartIso && r.date <= periodEndIso)
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
 }
 
-/** Sum of receipts.total in cents. Avoids float drift. */
+/**
+ * Sum of receipts.total in cents. Avoids float drift.
+ * Currency-blind — callers must pass single-currency lists (see usdOnly).
+ */
 export function totalCentsOf(receipts: Receipt[]): number {
   return receipts.reduce((acc, r) => acc + Math.round(r.total * 100), 0);
 }
 
-/** Build the in-memory Report + Lines from a list of receipts. */
+/** USD receipts only. Blank currency counts as USD. */
+export function usdOnly(receipts: Receipt[]): Receipt[] {
+  return receipts.filter(r => (r.currency || 'USD').toUpperCase() === 'USD');
+}
+
+/**
+ * Build the in-memory Report + Lines from a list of receipts.
+ *
+ * report.totalCents is the USD lines only. Non-USD lines are still listed
+ * (in their original currency) and summarised in report.notes; the month-end
+ * invoice converts them at the ECB reference rate for the charge date.
+ */
 export function assembleReport(
   receipts: Receipt[],
   client: 'kai',
@@ -78,7 +100,11 @@ export function assembleReport(
   const inPeriod = receiptsForPeriod(receipts, client, periodStartIso, periodEndIso);
   const id = reportIdFor(client, periodStartIso);
   const now = Date.now();
-  const totalCents = totalCentsOf(inPeriod);
+  const totalCents = totalCentsOf(usdOnly(inPeriod));
+  const { USD: _usd, ...foreign } = subtotalsByCurrency(inPeriod);
+  const notes = Object.keys(foreign).length > 0
+    ? `Not in total, converted at month-end (ECB): ${fmtSubtotals(foreign)}`
+    : undefined;
   const report: Report = {
     id,
     client,
@@ -88,6 +114,7 @@ export function assembleReport(
     invoiceNumber: id,
     totalCents,
     lineCount: inPeriod.length,
+    notes,
     createdAt: now,
     updatedAt: now,
   };
@@ -252,6 +279,56 @@ export async function markReportSent(reportId: string): Promise<void> {
     .update({ status: 'sent', sent_at: now, invoice_date: now.slice(0, 10) })
     .eq('id', reportId);
   if (error) throw error;
+}
+
+/**
+ * Record that this period's KAI receipts were billed on the month-end invoice.
+ * `invoiceNumber` is the house number (MMDDYY of the invoice date, e.g.
+ * 092426). The report id stays KAI-YYYY-MM; report_receipts rows are what the
+ * month-end skill reads (kai_export.report_lines_kai) to spot carry-overs.
+ */
+export async function markReportBilled(reportId: string, invoiceNumber: string): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('reports')
+    .update({
+      status: 'sent',
+      sent_at: now,
+      invoice_number: invoiceNumber,
+      invoice_date: invoiceDateFromNumber(invoiceNumber) ?? now.slice(0, 10),
+    })
+    .eq('id', reportId);
+  if (error) throw error;
+}
+
+/** '092426' → '2026-09-24'. Null if it isn't a valid MMDDYY date. */
+export function invoiceDateFromNumber(invoiceNumber: string): string | null {
+  const m = invoiceNumber.trim().match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (!m) return null;
+  const [, mm, dd, yy] = m;
+  const iso = `20${yy}-${mm}-${dd}`;
+  const d = new Date(iso + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return null;
+  // Reject roll-overs like 023126 → Mar 3.
+  if (d.getMonth() + 1 !== Number(mm) || d.getDate() !== Number(dd)) return null;
+  return iso;
+}
+
+/** Receipt ids already on a billed (sent/paid) report. */
+export async function fetchBilledReceiptIds(): Promise<Set<string>> {
+  const { data: reps, error } = await supabase
+    .from('reports')
+    .select('id')
+    .in('status', ['sent', 'paid']);
+  if (error) throw error;
+  const ids = (reps ?? []).map(r => (r as { id: string }).id);
+  if (ids.length === 0) return new Set();
+  const { data: lines, error: lErr } = await supabase
+    .from('report_receipts')
+    .select('receipt_id')
+    .in('report_id', ids);
+  if (lErr) throw lErr;
+  return new Set((lines ?? []).map(l => (l as { receipt_id: string }).receipt_id));
 }
 
 /** Mark a report paid. */

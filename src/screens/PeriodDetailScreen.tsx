@@ -1,15 +1,14 @@
-// Period detail — the invoice rendered as paper.
+// KAI month — the capture-side worksheet for one period.
 //
-// Reads the in-memory current-period preview (assembled live from receipts)
-// for the unsent case, OR the persisted Report + ReportLines for already-
-// saved/sent periods. Lets the user:
-//   - tap a row to edit the underlying receipt's notes (mutates the receipt)
-//   - tap Send → goes to send sheet, which generates the PDF and emails it
-//   - tap Preview PDF → generates the PDF and opens it
-//
-// Invoice typography aims at the Kalyani template fidelity: nominal letterhead,
-// Bill-To / Invoice grid, line-item table, total row above a black hairline,
-// payment-instructions footer.
+// The invoice itself is NOT built here any more. Since 2026-09-24 the house
+// invoice (invoice # = MMDDYY, ECB conversion, fee line) is built at
+// month-end by the `kai-monthly-invoice` skill from kai_export.receipts_kai.
+// This screen lets Thurston:
+//   - see every KAI-tagged line for the month in its ORIGINAL currency,
+//     with per-currency subtotals (never summed across currencies)
+//   - tap a row to edit the business-purpose note (the skill uses notes)
+//   - record "billed on invoice #MMDDYY" once the month-end invoice is out,
+//     which writes report_receipts so the skill can spot carry-overs.
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet, Alert, ActivityIndicator,
@@ -18,19 +17,30 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import {
-  fetchReportLines, periodLabel, periodStartFor, periodEndFor,
-  receiptsForPeriod, totalCentsOf, fmtCents, assembleReport, saveReport,
+  fetchReports, fetchReportLines, periodLabel, periodEndFor,
+  receiptsForPeriod, assembleReport, saveReport, markReportBilled,
+  invoiceDateFromNumber,
 } from '../lib/reports';
+import { subtotalsByCurrency } from '../lib/kaiBilling';
 import { Receipt, Report, ReportLine } from '../types';
 import { colors, type, reportStatusMeta } from '../theme';
-
-const KAI_RECIPIENT = 'thurston.adams@kalyaniaftermarket.com';
 
 // Parse 'KAI-2026-05' → period_start '2026-05-01'.
 function parseReportId(reportId: string): string | null {
   const m = reportId.match(/^KAI-(\d{4})-(\d{2})$/);
   if (!m) return null;
   return `${m[1]}-${m[2]}-01`;
+}
+
+function todayMMDDYY(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}${p(d.getDate())}${String(d.getFullYear()).slice(2)}`;
+}
+
+function fmtAmount(cents: number, currency: string): string {
+  const n = (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency === 'USD' ? n : `${currency} ${n}`;
 }
 
 export function PeriodDetailScreen() {
@@ -41,31 +51,26 @@ export function PeriodDetailScreen() {
   const [persistedReport, setPersistedReport] = useState<Report | null>(null);
   const [persistedLines, setPersistedLines] = useState<ReportLine[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Period bounds derived from the report id (e.g. KAI-2026-05 → May 2026).
   const periodStart = parseReportId(reportId);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Best-effort fetch of any persisted report + lines for this id.
-        // It's fine if there isn't one — we'll fall back to the live preview.
+        // A failed fetch must NOT look like "not billed yet" — that would
+        // offer "Mark billed" on a month that is already billed or paid.
         const [rep, lines] = await Promise.all([
-          (async () => {
-            try {
-              const all = await import('../lib/reports').then(m => m.fetchReports());
-              return all.find(r => r.id === reportId) ?? null;
-            } catch { return null; }
-          })(),
-          (async () => {
-            try { return await fetchReportLines(reportId); } catch { return []; }
-          })(),
+          fetchReports().then(all => all.find(r => r.id === reportId) ?? null),
+          fetchReportLines(reportId),
         ]);
         if (cancelled) return;
         setPersistedReport(rep);
         setPersistedLines(lines);
+      } catch {
+        if (!cancelled) setLoadFailed(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -73,19 +78,28 @@ export function PeriodDetailScreen() {
     return () => { cancelled = true; };
   }, [reportId]);
 
-  // Live preview from local receipts. Used when no persisted lines exist
-  // (current month, drafting). The persisted lines win once the report has
-  // been saved, because they snapshot what was actually billed.
+  const billed = persistedReport?.status === 'sent' || persistedReport?.status === 'paid';
+
+  // Live lines from local receipts until the period is billed; after that the
+  // persisted snapshot is what was actually billed.
   const liveReceipts: Receipt[] = useMemo(() => {
     if (!periodStart) return [];
-    const periodEnd = periodEndFor(periodStart);
-    return receiptsForPeriod(state.receipts, 'kai', periodStart, periodEnd);
+    return receiptsForPeriod(state.receipts, 'kai', periodStart, periodEndFor(periodStart));
   }, [state.receipts, periodStart]);
 
-  const liveTotalCents = useMemo(() => totalCentsOf(liveReceipts), [liveReceipts]);
+  // Saved lines carry no currency column; look it up from the receipt. If the
+  // receipt is gone, say so rather than defaulting to USD (which would fold a
+  // EUR line into the USD subtotal).
+  const currencyOf = useCallback(
+    (receiptId: string) => {
+      const r = state.receipts.find(x => x.id === receiptId);
+      return r ? (r.currency || 'USD').toUpperCase() : '???';
+    },
+    [state.receipts],
+  );
 
-  const lines: ReportLine[] = persistedLines.length > 0
-    ? persistedLines
+  const lines: (ReportLine & { currency: string })[] = billed && persistedLines.length > 0
+    ? persistedLines.map(l => ({ ...l, currency: currencyOf(l.receiptId) }))
     : liveReceipts.map((r, i) => ({
         reportId,
         receiptId: r.id,
@@ -95,67 +109,102 @@ export function PeriodDetailScreen() {
         category: r.category,
         notes: r.notes,
         totalCents: Math.round(r.total * 100),
+        currency: (r.currency || 'USD').toUpperCase(),
       }));
 
-  const totalCents = persistedReport ? persistedReport.totalCents : liveTotalCents;
-  const lineCount = lines.length;
-  const status = persistedReport?.status ?? (lineCount > 0 ? 'ready' : 'draft');
+  const subtotals = useMemo(
+    () => subtotalsByCurrency(lines.map(l => ({ total: l.totalCents / 100, currency: l.currency }))),
+    [lines],
+  );
+  const currencies = Object.keys(subtotals).sort((a, b) => (a === 'USD' ? -1 : b === 'USD' ? 1 : a.localeCompare(b)));
+  const hasForeign = currencies.some(c => c !== 'USD');
+
+  const status: Report['status'] = billed ? persistedReport!.status : (lines.length > 0 ? 'ready' : 'draft');
   const meta = reportStatusMeta[status];
 
-  // Inline-edit state for notes. Tap a row → set editingId; tap save closes it.
+  // Inline-edit state for notes (business purpose).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
 
   const startEditNotes = (line: ReportLine) => {
-    if (status === 'sent' || status === 'paid') {
-      Alert.alert('Sent', 'This invoice has been sent. Edit the underlying receipt to fix typos for next month.');
+    if (billed) {
+      Alert.alert('Already billed', 'This month is on a sent invoice. Edit the receipt itself if something needs correcting.');
       return;
     }
     setEditingId(line.receiptId);
     setEditNote(line.notes);
   };
 
-  const saveEditNotes = () => {
-    if (!editingId) return;
-    const r = state.receipts.find(x => x.id === editingId);
-    if (r) {
-      updateReceipt({ ...r, notes: editNote });
-    }
+  // Takes the value directly: the old setTimeout(saveEditNotes) pattern read
+  // a stale editNote from the previous render and saved the old text.
+  const saveEditNotes = (receiptId: string, next: string) => {
+    const r = state.receipts.find(x => x.id === receiptId);
+    if (r) updateReceipt({ ...r, notes: next });
+    setEditNote(next);
     setEditingId(null);
   };
 
-  // Persist the assembled report to Supabase. Doesn't change status to sent
-  // — only saveReport drafts it. Sent flag is set by the Send sheet.
-  const handlePersistDraft = useCallback(async () => {
+  const recordBilled = useCallback(async (invoiceNumber: string) => {
     if (!periodStart) return;
     setSaving(true);
     try {
-      const { report, lines: assembledLines } = assembleReport(state.receipts, 'kai', periodStart);
-      report.recipientEmail = persistedReport?.recipientEmail ?? KAI_RECIPIENT;
-      if (persistedReport?.status) report.status = persistedReport.status;
-      await saveReport(report, assembledLines, userId);
-      setPersistedReport(report);
-      setPersistedLines(assembledLines);
+      // Re-check the server right before writing: never overwrite a period
+      // that another device (or an earlier tap) already billed or paid.
+      const current = (await fetchReports()).find(r => r.id === reportId);
+      if (current && (current.status === 'sent' || current.status === 'paid')) {
+        setPersistedReport(current);
+        Alert.alert('Already billed', `This month is already on invoice #${current.invoiceNumber}.`);
+        return;
+      }
+      const { report, lines: assembled } = assembleReport(state.receipts, 'kai', periodStart);
+      report.invoiceNumber = invoiceNumber;
+      await saveReport(report, assembled, userId);
+      await markReportBilled(report.id, invoiceNumber);
+      setPersistedReport({
+        ...report,
+        status: 'sent',
+        invoiceDate: invoiceDateFromNumber(invoiceNumber) ?? undefined,
+        sentAt: Date.now(),
+      });
+      setPersistedLines(assembled);
     } catch (err) {
-      Alert.alert('Save failed', String((err as Error).message ?? err));
+      Alert.alert('Could not record', String((err as Error).message ?? err));
     } finally {
       setSaving(false);
     }
-  }, [periodStart, state.receipts, persistedReport, userId]);
+  }, [periodStart, reportId, state.receipts, userId]);
 
-  const handleSend = async () => {
-    // Persist first so the Send sheet has the latest snapshot to PDF + email.
-    await handlePersistDraft();
-    navigate('send-sheet');
+  const promptBilled = () => {
+    Alert.prompt(
+      'Billed on which invoice?',
+      'Enter the month-end invoice number (MMDDYY, e.g. 092426). This marks these lines as billed so they are not carried over.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Record',
+          onPress: (text?: string) => {
+            const num = (text ?? '').trim();
+            if (!invoiceDateFromNumber(num)) {
+              Alert.alert('Invalid invoice number', 'Use the MMDDYY invoice date, e.g. 092426.');
+              return;
+            }
+            recordBilled(num);
+          },
+        },
+      ],
+      'plain-text',
+      todayMMDDYY(),
+      'number-pad',
+    );
   };
 
   if (!reportId || !periodStart) {
     return (
       <SafeAreaView style={styles.root}>
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>No report selected.</Text>
+          <Text style={styles.emptyText}>No period selected.</Text>
           <Pressable onPress={() => navigate('reports')}>
-            <Text style={styles.backLink}>Back to Reports</Text>
+            <Text style={styles.backLink}>Back to KAI</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -167,7 +216,7 @@ export function PeriodDetailScreen() {
       <View style={styles.nav}>
         <Pressable style={styles.navBtn} onPress={() => navigate('reports')}>
           <Icon name="chevronLeft" size={20} color={colors.modern.brand} />
-          <Text style={styles.navBack}>Reports</Text>
+          <Text style={styles.navBack}>KAI</Text>
         </Pressable>
         <Text style={styles.navTitle}>{periodLabel(periodStart)}</Text>
         <View style={{ width: 80 }} />
@@ -180,46 +229,29 @@ export function PeriodDetailScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.scroll}>
 
-          {/* Letterhead */}
           <View style={styles.letterhead}>
-            <Text style={styles.brand}>Kalyani Aftermarket</Text>
-            <Text style={styles.brandSub}>166 E 96th St Suite 3B · New York, NY 10128</Text>
+            <Text style={type.eyebrow}>KAI · month-end</Text>
+            <Text style={styles.brand}>{periodLabel(periodStart)} reimbursables</Text>
+            <View style={[styles.pill, { backgroundColor: meta.bg, marginTop: 8, alignSelf: 'flex-start' }]}>
+              <Text style={[styles.pillText, { color: meta.fg }]}>{meta.label}</Text>
+            </View>
+            <Text style={styles.billedLine}>
+              {billed
+                ? `Billed on invoice #${persistedReport!.invoiceNumber}${persistedReport!.invoiceDate ? ` · ${persistedReport!.invoiceDate}` : ''}`
+                : 'The invoice is built at month-end from these lines.'}
+            </Text>
           </View>
 
-          {/* Bill To / Invoice grid */}
-          <View style={styles.headerGrid}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.eyebrow}>Bill to</Text>
-              <Text style={styles.billTo}>KAI</Text>
-              <Text style={styles.addrLine}>508 Carthage St</Text>
-              <Text style={styles.addrLine}>Sanford, NC 27330</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.eyebrow}>Invoice</Text>
-              <Text style={styles.invoiceNum}>{reportId}</Text>
-              <Text style={styles.addrLine}>
-                {persistedReport?.invoiceDate ? `Issued ${persistedReport.invoiceDate}` : 'Draft — not yet issued'}
-              </Text>
-              {persistedReport?.dueDate ? (
-                <Text style={styles.addrLine}>Due {persistedReport.dueDate}</Text>
-              ) : null}
-              <View style={[styles.pill, { backgroundColor: meta.bg, marginTop: 6 }]}>
-                <Text style={[styles.pillText, { color: meta.fg }]}>{meta.label}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Lines */}
           <View style={styles.lineHeader}>
             <Text style={[styles.eyebrowSmall, { width: 44 }]}>Date</Text>
-            <Text style={[styles.eyebrowSmall, { flex: 1 }]}>Vendor · category</Text>
-            <Text style={[styles.eyebrowSmall, { width: 70, textAlign: 'right' }]}>Amount</Text>
+            <Text style={[styles.eyebrowSmall, { flex: 1 }]}>Vendor · purpose</Text>
+            <Text style={[styles.eyebrowSmall, { width: 96, textAlign: 'right' }]}>Amount</Text>
           </View>
 
           {lines.length === 0 && (
             <View style={styles.emptyLines}>
-              <Text style={styles.emptyText}>No KAI receipts in this period yet.</Text>
-              <Text style={styles.emptyHint}>Tag receipts as "Bill to KAI" to fill this invoice.</Text>
+              <Text style={styles.emptyText}>No KAI receipts in this month yet.</Text>
+              <Text style={styles.emptyHint}>Turn on "Bill to KAI" on a receipt to add it here.</Text>
             </View>
           )}
 
@@ -239,53 +271,50 @@ export function PeriodDetailScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.lineVendor}>{line.vendor || 'Unknown vendor'}</Text>
                   <Text style={styles.lineCategory}>
-                    {line.notes ? line.notes : line.category || 'Uncategorized'}
+                    {line.notes ? line.notes : `${line.category || 'Uncategorized'} · add a business purpose`}
                   </Text>
                 </View>
-                <Text style={[styles.lineAmount, { width: 70 }]}>
-                  {(line.totalCents / 100).toFixed(2)}
+                <Text style={[styles.lineAmount, { width: 96 }]}>
+                  {fmtAmount(line.totalCents, line.currency)}
                 </Text>
               </Pressable>
             );
           })}
 
-          {/* Total */}
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalAmount}>{fmtCents(totalCents)}</Text>
-          </View>
-
-          {/* Payment instructions footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerEyebrow}>Make payment to</Text>
-            <Text style={styles.footerLine}>XMOTION VEHICLE TECHNOLOGIES LLC</Text>
-            <Text style={styles.footerLine}>6855 E. Camelback Rd. Unit 5012</Text>
-            <Text style={styles.footerLine}>Scottsdale, AZ 85251</Text>
-            <Text style={[styles.footerEyebrow, { marginTop: 12 }]}>Bank</Text>
-            <Text style={styles.footerLine}>Bank of America · Acct 4570 5190 6421</Text>
-            <Text style={styles.footerLine}>ACH routing 122101706</Text>
-          </View>
+          {lines.length > 0 && (
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Subtotals</Text>
+            </View>
+          )}
+          {currencies.map(c => (
+            <View key={c} style={styles.subRow}>
+              <Text style={styles.subLabel}>{c}</Text>
+              <Text style={styles.subAmount}>{fmtAmount(subtotals[c], c)}</Text>
+            </View>
+          ))}
+          {hasForeign && (
+            <Text style={styles.fxNote}>
+              Currencies are never added together here. Non-USD lines are converted at the ECB
+              reference rate for the charge date when the month-end invoice is built.
+            </Text>
+          )}
 
         </ScrollView>
       )}
 
-      {/* Inline note-edit panel */}
       {editingId && (
         <View style={styles.editPanel}>
-          <Text style={styles.editLabel}>Note</Text>
+          <Text style={styles.editLabel}>Business purpose</Text>
           <Text
             style={styles.editText}
             onPress={() => Alert.prompt(
-              'Edit notes',
-              'These notes appear on the invoice line.',
+              'Business purpose',
+              'Appears in the Notes column of the month-end invoice.',
               [
                 { text: 'Cancel', style: 'cancel', onPress: () => setEditingId(null) },
                 {
                   text: 'Save',
-                  onPress: (next?: string) => {
-                    setEditNote(next ?? '');
-                    setTimeout(() => saveEditNotes(), 0);
-                  },
+                  onPress: (next?: string) => saveEditNotes(editingId, next ?? ''),
                 },
               ],
               'plain-text',
@@ -297,25 +326,25 @@ export function PeriodDetailScreen() {
         </View>
       )}
 
-      {/* Sticky action bar */}
-      <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <Pressable
-          style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.85 }]}
-          onPress={handleSend}
-          disabled={saving || lineCount === 0}
-        >
-          <Text style={styles.btnPrimaryText}>
-            {saving ? 'Saving…' : status === 'sent' ? 'Re-send to KAI' : 'Send to KAI'}
+      {loadFailed && (
+        <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <Text style={styles.emptyHint}>
+            Couldn't load this month's billing status. Check your connection and reopen.
           </Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.btnSecondary, pressed && { opacity: 0.55 }]}
-          onPress={handlePersistDraft}
-          disabled={saving}
-        >
-          <Text style={styles.btnSecondaryText}>{saving ? 'Saving…' : 'Save draft'}</Text>
-        </Pressable>
-      </View>
+        </View>
+      )}
+
+      {!loading && !loadFailed && !billed && (
+        <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <Pressable
+            style={({ pressed }) => [styles.btnPrimary, (saving || lines.length === 0) && { opacity: 0.4 }, pressed && { opacity: 0.85 }]}
+            onPress={promptBilled}
+            disabled={saving || lines.length === 0}
+          >
+            <Text style={styles.btnPrimaryText}>{saving ? 'Recording…' : 'Mark billed on invoice #…'}</Text>
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -378,6 +407,13 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3, fontVariant: ['tabular-nums'],
   },
 
+  subRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6,
+  },
+  subLabel: { fontSize: 12, color: colors.modern.inkSecondary },
+  subAmount: { fontSize: 13, color: colors.modern.ink, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  fxNote: { fontSize: 11, color: colors.modern.inkTertiary, marginTop: 10, lineHeight: 15 },
+  billedLine: { fontSize: 12, color: colors.modern.inkSecondary, marginTop: 6 },
   footer: { marginTop: 32, paddingTop: 18, borderTopWidth: 0.5, borderTopColor: colors.modern.border },
   footerEyebrow: { ...type.eyebrow, fontSize: 9 },
   footerLine: { fontSize: 11, color: colors.modern.inkSecondary, lineHeight: 16, marginTop: 2 },

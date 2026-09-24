@@ -111,7 +111,6 @@ export type Screen =
   | 'report'
   | 'search'
   | 'forwarding'
-  | 'reports'         // KAI invoice list
+  | 'reports'         // KAI month-end (periods + carry-overs)
   | 'period-detail'   // single-report view
-  | 'send-sheet'      // pre-flight email composer
   | 'organize';       // bulk Bill-to-KAI sweep

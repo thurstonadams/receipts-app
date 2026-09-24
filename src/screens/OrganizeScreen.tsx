@@ -6,9 +6,10 @@
 //   - Not billable   → set billableTo = null  (decisively "no")
 //   - Skip           → leave undefined (revisit later)
 //
-// AI-pre-suggestion is heuristic: vendors that match common KAI-billable
-// software/services get a soft default of "Bill to KAI". User can override
-// with a tap; the suggestion is just a default, not a forced answer.
+// Suggestion is a heuristic on category: travel and meals are what the KAI
+// month-end invoice actually carries (Travel / Meals / Membership Dues).
+// Software is never billable to KAI (ruling 2026-09-24): the Bill button is
+// disabled for it and the card says why.
 import React, { useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet,
@@ -19,29 +20,12 @@ import { Icon } from '../components/Icon';
 import { Receipt } from '../types';
 import { fmtMoney } from '../lib/format';
 import { colors, type } from '../theme';
+import { kaiBillability } from '../lib/kaiBilling';
 
-// Vendors most likely to be billable passthrough (rough first-cut). User can
-// extend this dictionary by tagging — once the data shows a pattern we'll
-// learn from it.
-const LIKELY_BILLABLE_VENDORS = new Set([
-  'anthropic',
-  'aws',
-  'amazon web services',
-  'hostinger',
-  'postmark',
-  'supabase',
-  'github',
-  'vercel',
-  'netlify',
-  'cloudflare',
-  'sentry',
-  'datadog',
-  'openai',
-]);
+const LIKELY_BILLABLE_CATEGORIES = new Set(['Travel', 'Meals & Entertainment']);
 
 function suggestsBillable(receipt: Receipt): boolean {
-  const v = receipt.vendor.trim().toLowerCase();
-  return LIKELY_BILLABLE_VENDORS.has(v);
+  return LIKELY_BILLABLE_CATEGORIES.has(receipt.category) && kaiBillability(receipt).ok;
 }
 
 export function OrganizeScreen() {
@@ -96,6 +80,7 @@ export function OrganizeScreen() {
   }
 
   const suggested = suggestsBillable(current);
+  const billability = kaiBillability(current);
 
   return (
     <SafeAreaView edges={['top']} style={styles.root}>
@@ -124,8 +109,13 @@ export function OrganizeScreen() {
           <View style={styles.suggestionPill}>
             <Icon name="bolt" size={12} color={colors.modern.amberInk} />
             <Text style={styles.suggestionText}>
-              Vendor often appears on KAI invoices. Suggested: bill to KAI.
+              Travel and meals usually go on the KAI invoice. Suggested: bill to KAI.
             </Text>
+          </View>
+        )}
+        {!billability.ok && (
+          <View style={styles.suggestionPill}>
+            <Text style={styles.suggestionText}>{billability.reason}</Text>
           </View>
         )}
 
@@ -134,9 +124,11 @@ export function OrganizeScreen() {
             style={({ pressed }) => [
               styles.btnPrimary,
               suggested && styles.btnPrimarySuggested,
-              pressed && { opacity: 0.85 },
+              !billability.ok && { opacity: 0.35 },
+              pressed && billability.ok && { opacity: 0.85 },
             ]}
             onPress={() => tag('kai')}
+            disabled={!billability.ok}
           >
             <Text style={styles.btnPrimaryText}>Bill to KAI</Text>
           </Pressable>

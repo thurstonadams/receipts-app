@@ -6,7 +6,7 @@ import { ENTITIES } from '../data/entities';
 import { uid } from '../lib/format';
 import { deletePhoto, uploadPhotoToStorage, deletePhotoFromStorage } from '../lib/photos';
 import { pushReceipt, deleteReceiptRemote, fetchAllReceipts, subscribeToReceipts } from '../lib/syncReceipts';
-import { reducer, initialState, State } from './reducer';
+import { reducer, initialState, State, mergeRemote } from './reducer';
 
 // v3 keys are scoped by the authenticated user id so different accounts on the
 // same device don't bleed into each other's local cache. v2 keys (unscoped)
@@ -16,6 +16,19 @@ const LEGACY_KEY_ENTITY   = '@xfix-receipts:entity:v2';
 const keyReceipts = (uid: string) => `@xfix-receipts:receipts:v3:${uid}`;
 const keyEntity   = (uid: string) => `@xfix-receipts:entity:v3:${uid}`;
 const keyMigrated = (uid: string) => `@xfix-receipts:v3-migrated:${uid}`;
+// Retry queue (receipt ids, 'photo:<id>', 'del:<id>'). Persisted so offline
+// captures survive an app restart instead of being dropped by the next refresh.
+const keyPending  = (uid: string) => `@xfix-receipts:pending:v1:${uid}`;
+
+function parseKeys(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 
 interface StoreValue {
@@ -79,16 +92,18 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     (async () => {
       try {
         await migrateV2IfNeeded(userId);
-        const [rawReceipts, savedEntity] = await Promise.all([
+        const [rawReceipts, savedEntity, rawPending] = await Promise.all([
           AsyncStorage.getItem(keyReceipts(userId)),
           AsyncStorage.getItem(keyEntity(userId)),
+          AsyncStorage.getItem(keyPending(userId)),
         ]);
+        const pendingSync = parseKeys(rawPending);
         let receipts: Receipt[] = [];
         if (rawReceipts) {
           try { receipts = JSON.parse(rawReceipts); } catch { receipts = []; }
         }
         if (!cancelled) {
-          dispatch({ type: 'HYDRATE', receipts, entityId: savedEntity ?? 'xfix' });
+          dispatch({ type: 'HYDRATE', receipts, entityId: savedEntity ?? 'xfix', pendingSync });
           hydratedRef.current = true;
         }
         // Fresh install or cleared data — restore from Supabase cloud backup.
@@ -138,13 +153,22 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     return unsubscribe;
   }, [userId]);
 
+  // Persist the retry queue on every change.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    AsyncStorage.setItem(keyPending(userIdRef.current), JSON.stringify(state.pendingSync)).catch(() => {});
+  }, [state.pendingSync]);
+
   // Persist selected entity locally.
   useEffect(() => {
     if (!hydratedRef.current) return;
     AsyncStorage.setItem(keyEntity(userIdRef.current), state.entityId).catch(() => {});
   }, [state.entityId]);
 
+  // Queue first, then push. If the app dies mid-upload the id is already in
+  // the persisted queue, so the next refresh keeps the receipt and retries it.
   const pushOne = useCallback(async (r: Receipt) => {
+    dispatch({ type: 'MARK_PENDING', key: r.id });
     try {
       await pushReceipt(r, userIdRef.current);
       dispatch({ type: 'MARK_SYNCED', key: r.id });
@@ -154,6 +178,7 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
   }, []);
 
   const removeOne = useCallback(async (id: string) => {
+    dispatch({ type: 'MARK_PENDING', key: `del:${id}` });
     try {
       await deleteReceiptRemote(id);
       dispatch({ type: 'MARK_SYNCED', key: `del:${id}` });
@@ -168,6 +193,7 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
   // survive a fresh install. Fire-and-forget — a failure just marks
   // photo:<id> pending for later retry.
   const uploadPhoto = useCallback(async (receiptId: string, localUri: string) => {
+    dispatch({ type: 'MARK_PENDING', key: `photo:${receiptId}` });
     try {
       const path = await uploadPhotoToStorage(localUri, userIdRef.current, receiptId);
       const current = receiptsRef.current.find(r => r.id === receiptId);
@@ -187,35 +213,19 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
   const refreshFromCloud = useCallback(async () => {
     try {
       const incoming = await fetchAllReceipts();
-      const incomingIds = new Set(incoming.map(r => r.id));
-      const pending = new Set(pendingSyncRef.current);
-      const localOnly = receiptsRef.current.filter(r => !incomingIds.has(r.id) && pending.has(r.id));
-      const merged: Receipt[] = incoming.map(r => {
-        const local = receiptsRef.current.find(x => x.id === r.id);
-        return local && local.updatedAt > r.updatedAt ? local : r;
+      dispatch({
+        type: 'REFRESH',
+        receipts: mergeRemote(receiptsRef.current, incoming, pendingSyncRef.current),
       });
-      dispatch({ type: 'REFRESH', receipts: [...localOnly, ...merged] });
     } catch {
       // Network issue, etc. — leave state as-is.
     }
   }, []);
 
-  // Belt-and-suspenders in case the Realtime socket drops or missed events:
-  // whenever the app returns from background, pull the full set again.
-  useEffect(() => {
-    if (!hydratedRef.current) {
-      // defer until after initial hydrate
-    }
-    const sub = AppState.addEventListener('change', next => {
-      if (next === 'active' && hydratedRef.current) {
-        refreshFromCloud();
-      }
-    });
-    return () => sub.remove();
-  }, [refreshFromCloud]);
-
+  // Flush the retry queue. Reads the ref so it is safe to call from the
+  // AppState listener and the post-hydrate effect below.
   const retryPendingSync = useCallback(async () => {
-    const keys = [...state.pendingSync];
+    const keys = [...pendingSyncRef.current];
     for (const key of keys) {
       if (key.startsWith('del:')) {
         await removeOne(key.slice(4));
@@ -230,7 +240,28 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
         else dispatch({ type: 'MARK_SYNCED', key });
       }
     }
-  }, [state.pendingSync, pushOne, removeOne, uploadPhoto]);
+  }, [pushOne, removeOne, uploadPhoto]);
+
+  // After hydrate: push anything left over from the last session (captured
+  // offline, or the app was killed mid-upload) before the user touches it.
+  useEffect(() => {
+    if (!state.ready || pendingSyncRef.current.length === 0) return;
+    retryPendingSync();
+    // Run once per hydrate, not on every queue change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.ready]);
+
+  // Belt-and-suspenders in case the Realtime socket drops or missed events:
+  // whenever the app returns from background, flush the queue, then pull the
+  // full set again. mergeRemote keeps anything still queued.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active' && hydratedRef.current) {
+        retryPendingSync().finally(() => refreshFromCloud());
+      }
+    });
+    return () => sub.remove();
+  }, [refreshFromCloud, retryPendingSync]);
 
   const currentEntity = ENTITIES.find(e => e.id === state.entityId) ?? ENTITIES[0];
   const receiptsForEntity = state.receipts.filter(r => r.entityId === state.entityId);

@@ -1,16 +1,23 @@
 import {
   periodStartFor, periodEndFor, periodLabel, reportIdFor,
   receiptsForPeriod, totalCentsOf, computeStats, fmtCents, assembleReport,
+  invoiceDateFromNumber,
 } from './reports';
 import { Receipt, Report } from '../types';
 
-function r(id: string, date: string, total: number, billable: 'kai' | null = 'kai'): Receipt {
+function r(
+  id: string, date: string, total: number, billable: 'kai' | null = 'kai',
+  over: Partial<Receipt> = {},
+): Receipt {
   return {
+    // Default fixture is a Travel receipt: software is not billable to KAI
+    // (ruling 2026-09-24), so it can no longer be the "typical" KAI line.
     id, entityId: 'xfix', vendor: 'Test', date, total,
-    currency: 'USD', payment: 'Visa', category: 'Software & Subscriptions',
+    currency: 'USD', payment: 'Visa', category: 'Travel',
     notes: '', status: 'ready', thumbTone: 0,
     billableTo: billable,
     createdAt: 0, updatedAt: 0,
+    ...over,
   };
 }
 
@@ -60,6 +67,16 @@ describe('receiptsForPeriod', () => {
     ];
     const result = receiptsForPeriod(all, 'kai', '2026-05-01', '2026-05-31');
     expect(result.map(x => x.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  test('drops software even if it was tagged Bill to KAI before the 2026-09-24 ruling', () => {
+    const all = [
+      r('trip', '2026-05-02', 10),
+      r('sub', '2026-05-03', 20, 'kai', { category: 'Software & Subscriptions', vendor: 'Anthropic' }),
+      r('aws', '2026-05-04', 30, 'kai', { category: 'Other', vendor: 'Amazon AWS' }),
+    ];
+    const result = receiptsForPeriod(all, 'kai', '2026-05-01', '2026-05-31');
+    expect(result.map(x => x.id)).toEqual(['trip']);
   });
 });
 
@@ -148,5 +165,35 @@ describe('assembleReport', () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatchObject({ receiptId: 'a', lineNo: 1, totalCents: 1000 });
     expect(lines[1]).toMatchObject({ receiptId: 'b', lineNo: 2, totalCents: 2005 });
+  });
+
+  test('never adds EUR into the USD total (Aug/Sep 2026 had EUR meals)', () => {
+    const receipts = [
+      r('hotel', '2026-09-02', 1861.97),
+      r('dinner', '2026-09-09', 155.2, 'kai', { currency: 'EUR' }),
+      r('lunch', '2026-09-10', 36, 'kai', { currency: 'EUR' }),
+    ];
+    const { report, lines } = assembleReport(receipts, 'kai', '2026-09-01');
+    expect(report.totalCents).toBe(186197);          // USD lines only
+    expect(report.lineCount).toBe(3);                 // every line still listed
+    expect(report.notes).toBe('Not in total, converted at month-end (ECB): EUR 191.20');
+    expect(lines.map(l => l.totalCents)).toEqual([186197, 15520, 3600]); // original-currency amounts
+  });
+
+  test('all-USD period carries no conversion note', () => {
+    const { report } = assembleReport([r('a', '2026-05-01', 10)], 'kai', '2026-05-01');
+    expect(report.notes).toBeUndefined();
+  });
+});
+
+describe('invoiceDateFromNumber (house invoice # = MMDDYY)', () => {
+  test('parses the real 2026 numbers', () => {
+    expect(invoiceDateFromNumber('082826')).toBe('2026-08-28');
+    expect(invoiceDateFromNumber('092426')).toBe('2026-09-24');
+  });
+  test('rejects anything that is not a real date', () => {
+    expect(invoiceDateFromNumber('KAI-2026-08')).toBeNull();
+    expect(invoiceDateFromNumber('023126')).toBeNull(); // Feb 31
+    expect(invoiceDateFromNumber('13012')).toBeNull();
   });
 });

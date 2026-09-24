@@ -1,4 +1,4 @@
-import { reducer, initialState } from './reducer';
+import { reducer, initialState, mergeRemote } from './reducer';
 import { Receipt } from '../types';
 
 function r(id: string, partial: Partial<Receipt> = {}): Receipt {
@@ -116,5 +116,66 @@ describe('reducer', () => {
     // @ts-expect-error — exercising the default branch deliberately
     const next = reducer(initialState, { type: 'NOPE' });
     expect(next).toBe(initialState);
+  });
+});
+
+// ── Offline-capture loss (found 2026-09-24) ──────────────────────────────
+// pendingSync lived only in memory. After an app restart it was empty, so the
+// next foreground refresh dropped any receipt that had never reached Supabase.
+describe('offline captures survive a restart', () => {
+  test('HYDRATE restores the persisted pending-sync queue', () => {
+    const next = reducer(initialState, {
+      type: 'HYDRATE',
+      receipts: [r('offline')],
+      entityId: 'xfix',
+      pendingSync: ['offline', 'photo:offline'],
+    });
+    expect(next.pendingSync).toEqual(['offline', 'photo:offline']);
+  });
+
+  test('HYDRATE without a queue keeps the old behaviour (empty)', () => {
+    const next = reducer(initialState, { type: 'HYDRATE', receipts: [], entityId: 'xfix' });
+    expect(next.pendingSync).toEqual([]);
+  });
+
+  test('mergeRemote keeps a local-only receipt that is still queued', () => {
+    const local = [r('offline', { updatedAt: 5 }), r('shared', { updatedAt: 1 })];
+    const incoming = [r('shared', { updatedAt: 2, vendor: 'Remote edit' })];
+    const merged = mergeRemote(local, incoming, ['offline']);
+    expect(merged.map(x => x.id).sort()).toEqual(['offline', 'shared']);
+    expect(merged.find(x => x.id === 'shared')!.vendor).toBe('Remote edit');
+  });
+
+  test('mergeRemote drops a local-only receipt that is NOT queued (deleted on another device)', () => {
+    const merged = mergeRemote([r('gone')], [], []);
+    expect(merged).toEqual([]);
+  });
+
+  test('mergeRemote keeps the newer local edit over an older remote row', () => {
+    const merged = mergeRemote([r('x', { updatedAt: 9, vendor: 'Local' })], [r('x', { updatedAt: 3, vendor: 'Remote' })], []);
+    expect(merged[0].vendor).toBe('Local');
+  });
+});
+
+describe('mergeRemote — review findings 2026-09-24', () => {
+  test('keeps the local photoUri when the cloud row wins (cloud never carries it)', () => {
+    const local = [r('p', { updatedAt: 5, photoUri: 'file:///doc/receipt-photos/p.jpg' })];
+    const incoming = [r('p', { updatedAt: 5, photoUri: undefined })];
+    expect(mergeRemote(local, incoming, [])[0].photoUri).toBe('file:///doc/receipt-photos/p.jpg');
+  });
+
+  test('keeps "no billing decision yet" (undefined) when the cloud says null', () => {
+    const merged = mergeRemote([r('c', { billableTo: undefined })], [r('c', { billableTo: null })], []);
+    expect(merged[0].billableTo).toBeUndefined();
+  });
+
+  test('a real cloud decision still wins over local undefined', () => {
+    const merged = mergeRemote([r('c', { billableTo: undefined })], [r('c', { billableTo: 'kai' })], []);
+    expect(merged[0].billableTo).toBe('kai');
+  });
+
+  test('does not resurrect a receipt whose delete is still queued', () => {
+    const merged = mergeRemote([], [r('deleted-here')], ['del:deleted-here']);
+    expect(merged).toEqual([]);
   });
 });
