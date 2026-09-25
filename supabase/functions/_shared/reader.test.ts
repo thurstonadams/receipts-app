@@ -62,6 +62,16 @@ describe('parseExtraction', () => {
     expect(e?.category).toBeNull();
     expect(e?.date).toBeNull();
   });
+  test('book_hint: xfix/personal kept, kai and junk dropped', () => {
+    expect(parseExtraction('{"book_hint":"Personal"}')?.book_hint).toBe('personal');
+    expect(parseExtraction('{"book_hint":"xfix"}')?.book_hint).toBe('xfix');
+    expect(parseExtraction('{"book_hint":"kai"}')?.book_hint).toBeNull();
+    expect(parseExtraction('{"vendor":"x"}')?.book_hint).toBeNull();
+  });
+  test('service_date: valid kept, junk dropped', () => {
+    expect(parseExtraction('{"service_date":"2026-09-07"}')?.service_date).toBe('2026-09-07');
+    expect(parseExtraction('{"service_date":"Sept 7"}')?.service_date).toBeNull();
+  });
   test('garbage → null', () => {
     expect(parseExtraction('no json here')).toBeNull();
   });

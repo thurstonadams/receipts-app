@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback, useState, useMemo } from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Receipt, Screen } from '../types';
+import { Receipt, Screen, Trip } from '../types';
 import { ENTITIES } from '../data/entities';
-import { uid } from '../lib/format';
+import { uid, todayISO } from '../lib/format';
+import { fetchTrips, saveTrip as saveTripRemote, deleteTrip as deleteTripRemote, tripFor, sanitizeTrips } from '../lib/trips';
+import { isVisible } from '../lib/receiptFlags';
 import { deletePhoto, uploadPhotoToStorage, deletePhotoFromStorage } from '../lib/photos';
 import { pushReceipt, deleteReceiptRemote, fetchAllReceipts, subscribeToReceipts } from '../lib/syncReceipts';
 import { reducer, initialState, State, mergeRemote } from './reducer';
@@ -19,6 +21,8 @@ const keyMigrated = (uid: string) => `@xfix-receipts:v3-migrated:${uid}`;
 // Retry queue (receipt ids, 'photo:<id>', 'del:<id>'). Persisted so offline
 // captures survive an app restart instead of being dropped by the next refresh.
 const keyPending  = (uid: string) => `@xfix-receipts:pending:v1:${uid}`;
+// Trips cached so an offline capture still lands in the right book.
+const keyTrips    = (uid: string) => `@xfix-receipts:trips:v1:${uid}`;
 
 function parseKeys(raw: string | null): string[] {
   if (!raw) return [];
@@ -37,7 +41,15 @@ interface StoreValue {
   entities: typeof ENTITIES;
   currentEntity: (typeof ENTITIES)[number];
   currentReceipt: Receipt | null;
+  /** Every receipt except linked duplicates. Screens use this, never state.receipts. */
+  receipts: Receipt[];
   receiptsForEntity: Receipt[];
+  trips: Trip[];
+  /** Book for a new capture on `date`: the covering trip's, else the selected one. */
+  bookForDate: (date: string) => string;
+  saveTrip: (t: Trip) => Promise<void>;
+  removeTrip: (id: string) => Promise<void>;
+  refreshTrips: () => Promise<void>;
   unsyncedCount: number;
   setEntity: (id: string) => void;
   navigate: (screen: Screen, receiptId?: string | null) => void;
@@ -75,6 +87,29 @@ async function migrateV2IfNeeded(userId: string): Promise<void> {
 
 export function StoreProvider({ children, userId }: { children: React.ReactNode; userId: string }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [trips, setTrips] = useState<Trip[]>([]);
+
+  const refreshTrips = useCallback(async () => {
+    try {
+      const t = await fetchTrips();
+      setTrips(t);
+      AsyncStorage.setItem(keyTrips(userId), JSON.stringify(t)).catch(() => {});
+    } catch {
+      // Offline or table missing — keep the cached list.
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(keyTrips(userId))
+      .then(raw => {
+        if (cancelled || !raw) return;
+        try { setTrips(sanitizeTrips(JSON.parse(raw))); } catch { /* ignore */ }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) refreshTrips(); });
+    return () => { cancelled = true; };
+  }, [userId, refreshTrips]);
   const hydratedRef = useRef(false);
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
@@ -138,7 +173,13 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
       if (change.kind === 'upsert') {
         const incoming = change.receipt;
         const existing = receiptsRef.current.find(r => r.id === incoming.id);
-        if (existing && existing.updatedAt >= incoming.updatedAt) return;
+        if (existing && existing.updatedAt >= incoming.updatedAt) {
+          // Local edit is newer, but duplicate_of is owned by the server.
+          if ((existing.duplicateOf ?? null) !== (incoming.duplicateOf ?? null)) {
+            dispatch({ type: 'UPDATE_RECEIPT', receipt: { ...existing, duplicateOf: incoming.duplicateOf ?? null } });
+          }
+          return;
+        }
         if (existing) {
           dispatch({ type: 'UPDATE_RECEIPT', receipt: incoming });
         } else {
@@ -244,9 +285,12 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
 
   // After hydrate: push anything left over from the last session (captured
   // offline, or the app was killed mid-upload) before the user touches it.
+  // Then pull from the server, so fields the server owns (duplicates, reasons
+  // set by the email import) reach a device that started from its cache.
   useEffect(() => {
-    if (!state.ready || pendingSyncRef.current.length === 0) return;
-    retryPendingSync();
+    if (!state.ready) return;
+    const flush = pendingSyncRef.current.length > 0 ? retryPendingSync() : Promise.resolve();
+    flush.finally(() => refreshFromCloud());
     // Run once per hydrate, not on every queue change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.ready]);
@@ -258,13 +302,18 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active' && hydratedRef.current) {
         retryPendingSync().finally(() => refreshFromCloud());
+        refreshTrips();
       }
     });
     return () => sub.remove();
-  }, [refreshFromCloud, retryPendingSync]);
+  }, [refreshFromCloud, retryPendingSync, refreshTrips]);
 
   const currentEntity = ENTITIES.find(e => e.id === state.entityId) ?? ENTITIES[0];
-  const receiptsForEntity = state.receipts.filter(r => r.entityId === state.entityId);
+  const receipts = useMemo(() => state.receipts.filter(isVisible), [state.receipts]);
+  const receiptsForEntity = useMemo(
+    () => receipts.filter(r => r.entityId === state.entityId),
+    [receipts, state.entityId],
+  );
   const currentReceipt = state.receipts.find(r => r.id === state.currentReceiptId) ?? null;
 
   const value: StoreValue = {
@@ -273,7 +322,21 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
     entities: ENTITIES,
     currentEntity,
     currentReceipt,
+    receipts,
     receiptsForEntity,
+    trips,
+    bookForDate: (date: string) => tripFor(date || todayISO(), trips)?.entityId ?? currentEntity.id,
+    // Not optimistic: a trip decides where money is filed, so the list only
+    // ever shows what the server has. Errors propagate to the screen.
+    saveTrip: async t => {
+      await saveTripRemote({ ...t, updatedAt: Date.now() }, userIdRef.current);
+      await refreshTrips();
+    },
+    removeTrip: async id => {
+      await deleteTripRemote(id);
+      await refreshTrips();
+    },
+    refreshTrips,
     unsyncedCount: state.pendingSync.length,
     setEntity: id => dispatch({ type: 'SET_ENTITY', id }),
     navigate: (screen, receiptId) => dispatch({ type: 'NAVIGATE', screen, receiptId }),

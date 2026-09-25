@@ -1,4 +1,4 @@
-import { fmtMoney, fmtTotalsByCurrency, fmtDate, fmtDateFull, todayISO, uid } from './format';
+import { fmtMoney, currencyChoices, fmtTotalsByCurrency, fmtDate, fmtDateFull, todayISO, uid } from './format';
 
 describe('fmtMoney', () => {
   test('defaults to USD with $ prefix', () => {
@@ -8,8 +8,16 @@ describe('fmtMoney', () => {
     expect(fmtMoney(5, 'EUR')).toBe('€5.00');
     expect(fmtMoney(5, 'GBP')).toBe('£5.00');
   });
-  test('falls back to no symbol for unknown currencies', () => {
-    expect(fmtMoney(5, 'ZZZ')).toBe('5.00');
+  test('unknown currencies show their code, never a bare number', () => {
+    expect(fmtMoney(5, 'ZZZ')).toBe('ZZZ 5.00');
+  });
+  test('INR gets ₹ and Indian grouping (Conrad Pune folio)', () => {
+    expect(fmtMoney(177736.62, 'INR')).toBe('₹1,77,736.62');
+    expect(fmtMoney(22420, 'inr')).toBe('₹22,420.00');
+  });
+  test('currencyChoices keeps an unusual current currency visible', () => {
+    expect(currencyChoices('EUR')).toEqual(['USD', 'EUR']);
+    expect(currencyChoices('INR')).toEqual(['USD', 'EUR', 'INR']);
   });
   test('always renders two decimals', () => {
     expect(fmtMoney(0)).toBe('$0.00');

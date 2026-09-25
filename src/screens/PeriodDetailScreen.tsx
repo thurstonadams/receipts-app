@@ -44,7 +44,7 @@ function fmtAmount(cents: number, currency: string): string {
 }
 
 export function PeriodDetailScreen() {
-  const { state, navigate, updateReceipt, userId } = useStore();
+  const { state, receipts, navigate, updateReceipt, userId } = useStore();
   const insets = useSafeAreaInsets();
   const reportId = state.currentReportId ?? '';
 
@@ -84,18 +84,18 @@ export function PeriodDetailScreen() {
   // persisted snapshot is what was actually billed.
   const liveReceipts: Receipt[] = useMemo(() => {
     if (!periodStart) return [];
-    return receiptsForPeriod(state.receipts, 'kai', periodStart, periodEndFor(periodStart));
-  }, [state.receipts, periodStart]);
+    return receiptsForPeriod(receipts, 'kai', periodStart, periodEndFor(periodStart));
+  }, [receipts, periodStart]);
 
   // Saved lines carry no currency column; look it up from the receipt. If the
   // receipt is gone, say so rather than defaulting to USD (which would fold a
   // EUR line into the USD subtotal).
   const currencyOf = useCallback(
     (receiptId: string) => {
-      const r = state.receipts.find(x => x.id === receiptId);
+      const r = receipts.find(x => x.id === receiptId);
       return r ? (r.currency || 'USD').toUpperCase() : '???';
     },
-    [state.receipts],
+    [receipts],
   );
 
   const lines: (ReportLine & { currency: string })[] = billed && persistedLines.length > 0
@@ -138,7 +138,7 @@ export function PeriodDetailScreen() {
   // Takes the value directly: the old setTimeout(saveEditNotes) pattern read
   // a stale editNote from the previous render and saved the old text.
   const saveEditNotes = (receiptId: string, next: string) => {
-    const r = state.receipts.find(x => x.id === receiptId);
+    const r = receipts.find(x => x.id === receiptId);
     if (r) updateReceipt({ ...r, notes: next });
     setEditNote(next);
     setEditingId(null);
@@ -156,7 +156,7 @@ export function PeriodDetailScreen() {
         Alert.alert('Already billed', `This month is already on invoice #${current.invoiceNumber}.`);
         return;
       }
-      const { report, lines: assembled } = assembleReport(state.receipts, 'kai', periodStart);
+      const { report, lines: assembled } = assembleReport(receipts, 'kai', periodStart);
       report.invoiceNumber = invoiceNumber;
       await saveReport(report, assembled, userId);
       await markReportBilled(report.id, invoiceNumber);
@@ -172,7 +172,7 @@ export function PeriodDetailScreen() {
     } finally {
       setSaving(false);
     }
-  }, [periodStart, reportId, state.receipts, userId]);
+  }, [periodStart, reportId, receipts, userId]);
 
   const promptBilled = () => {
     Alert.prompt(

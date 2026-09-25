@@ -2,12 +2,29 @@
 // legacy/imported data with other codes keeps rendering via fmtMoney.
 export const CURRENCIES = ['USD', 'EUR'] as const;
 
+const SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', INR: '₹' };
+
 export function currencySymbol(cur: string): string {
-  return cur === 'USD' ? '$' : cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : '';
+  return SYMBOLS[(cur || 'USD').toUpperCase()] ?? '';
 }
 
+// Unknown codes render as "CHF 12.00" rather than a bare, ambiguous number.
 export function fmtMoney(n: number, cur: string = 'USD'): string {
-  return `${currencySymbol(cur)}${n.toFixed(2)}`;
+  const code = (cur || 'USD').toUpperCase();
+  const sym = SYMBOLS[code];
+  const amount = code === 'INR'
+    ? n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : n.toFixed(2);
+  return sym ? `${sym}${amount}` : `${code} ${amount}`;
+}
+
+// Currency chips on the Review screen: the usual two, plus whatever the
+// receipt already has (INR folio, GBP ride) so it stays visible and selected.
+export function currencyChoices(current: string): string[] {
+  const list: string[] = [...CURRENCIES];
+  const c = (current || 'USD').toUpperCase();
+  if (!list.includes(c)) list.push(c);
+  return list;
 }
 
 // Sum a list of receipts per currency and render as a single line, e.g.

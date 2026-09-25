@@ -13,6 +13,14 @@
 // Anything unclear stays 'needs-review' with review_reason saying why.
 // If the AI call fails, the old regex path runs and the row is flagged.
 //
+// v4 (2026-09-25): filing (./filing.ts). The book is picked by rules, in order:
+// software → xFix; a trip covering the charge/stay date → the trip's book;
+// Uber "[Personal]" → Personal; the AI's hint; the To: address. A "+tag"
+// address (receipts+personal@…) is an explicit choice and always wins.
+// KAI travel & meals are tagged "Bill to KAI" automatically. The same charge
+// arriving twice is linked (duplicate_of) and hidden; a same-vendor receipt
+// in another currency within 3 days is flagged "Possible duplicate".
+//
 // Pipeline:
 //   1. Verify shared-secret token in the URL.
 //   2. Look up the From: address in public.email_inbound_senders (allowlist).
@@ -28,6 +36,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { extractWithClaude, decide, parseForwardedFrom, htmlToText, type Attachment } from "./reader.ts";
+import { pickBook, autoBillToKai, findDuplicate, type Book, type Trip, type DupCandidate } from "./filing.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -170,6 +179,7 @@ Deno.serve(async (req: Request) => {
   let fields: {
     vendor: string; date: string; total: number; currency: string; category: string;
     categoryCode: string; status: "ready" | "needs-review"; reviewReason: string | null; ai: boolean;
+    serviceDate: string | null; bookHint: Book | null;
   };
   let aiRaw = "";
 
@@ -186,7 +196,7 @@ Deno.serve(async (req: Request) => {
     }, { apiKey: ANTHROPIC_API_KEY, model: READER_MODEL, fetchImpl: fetch as any });
     aiRaw = raw;
     const d = decide(extraction, { vendor: regexVendor, date: regexDate }, evidence);
-    fields = { ...d, ai: true };
+    fields = { ...d, ai: true, serviceDate: extraction?.service_date ?? null, bookHint: extraction?.book_hint ?? null };
   } catch (e) {
     console.warn("inbound-email: AI reader failed, using regex fallback", e);
     // Even without AI, never file the forwarder as vendor: use the original
@@ -204,8 +214,53 @@ Deno.serve(async (req: Request) => {
       status: "needs-review",
       reviewReason: "AI reader unavailable, please check",
       ai: false,
+      serviceDate: null,
+      bookHint: null,
     };
   }
+
+  // 4b. Filing — book, KAI billing, duplicates. Never blocks the import.
+  let book = route.entityId as Book;
+  let bookWhy = route.explicit ? "Address tag" : "Forwarding address";
+  let duplicateOf: string | null = null;
+  let possibleDuplicate = false;
+  try {
+    if (!route.explicit) {
+      const { data: trips } = await supabase.from("trips")
+        .select("id,name,start_date,end_date,entity_id").eq("user_id", userId);
+      const pick = pickBook({
+        date: fields.date, serviceDate: fields.serviceDate, subject, vendor: fields.vendor,
+        category: fields.category, aiHint: fields.bookHint, addressBook: route.entityId as Book,
+      }, (trips ?? []) as Trip[]);
+      book = pick.book; bookWhy = pick.why;
+    }
+    const dayMs = 86400000, t = Date.parse(fields.date + "T00:00:00Z");
+    if (fields.total > 0 && !isNaN(t)) {
+      const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+      const { data: near } = await supabase.from("receipts")
+        .select("id,vendor,date,total,currency,duplicate_of")
+        .eq("user_id", userId).gte("date", iso(t - 3 * dayMs)).lte("date", iso(t + 3 * dayMs))
+        .order("created_at", { ascending: true });
+      const dup = findDuplicate(
+        { id: receiptId, vendor: fields.vendor, date: fields.date, total: fields.total, currency: fields.currency },
+        ((near ?? []) as DupCandidate[]).map(r => ({ ...r, total: Number(r.total) })),
+      );
+      if (dup?.kind === "same") {
+        duplicateOf = dup.of;
+      } else if (dup?.kind === "possible") {
+        const other = (near ?? []).find((r: any) => r.id === dup.of) as any;
+        possibleDuplicate = true;
+        fields.status = "needs-review";
+        // Always shown, first: the app keys "never pre-tick Bill to KAI" on it.
+        const dupText = `Possible duplicate of ${other?.vendor ?? "another receipt"} ${other?.date ?? ""} (${other?.currency ?? ""} ${other?.total ?? ""})`.trim();
+        fields.reviewReason = fields.reviewReason ? `${dupText} · ${fields.reviewReason}` : dupText;
+      }
+    }
+  } catch (e) {
+    console.warn("inbound-email: filing step failed, keeping address book", e);
+  }
+  // Never auto-bill anything that might already be on an invoice.
+  const billableTo = fields.ai && !duplicateOf && !possibleDuplicate && autoBillToKai(book, fields.category, fields.vendor) ? "kai" : null;
 
   // 5. Upload attachments
   let photoPath: string | null = null;
@@ -261,7 +316,7 @@ Deno.serve(async (req: Request) => {
   const row = {
     id: receiptId,
     user_id: userId,
-    entity_id: route.entityId,
+    entity_id: book,
     vendor: fields.vendor,
     date: fields.date,
     total: fields.total,
@@ -272,8 +327,10 @@ Deno.serve(async (req: Request) => {
     project: null,
     notes: subject,
     status: fields.status,
-    review_reason: fields.reviewReason,
+    review_reason: duplicateOf ? null : fields.reviewReason,
     ai_extracted: fields.ai,
+    billable_to: billableTo,
+    duplicate_of: duplicateOf,
     thumb_tone: thumbTone,
     photo_uri: null,
     photo_path: photoPath,
@@ -294,14 +351,14 @@ Deno.serve(async (req: Request) => {
   if (fields.ai) {
     const { error: auErr } = await supabase.from("receipt_ai_audit").insert({
       receipt_id: receiptId, user_id: userId, mode: "inbound", model: READER_MODEL,
-      before: null, after: { vendor: fields.vendor, date: fields.date, total: fields.total, currency: fields.currency, category: fields.category, status: fields.status, review_reason: fields.reviewReason },
+      before: null, after: { vendor: fields.vendor, date: fields.date, total: fields.total, currency: fields.currency, category: fields.category, status: fields.status, review_reason: fields.reviewReason, service_date: fields.serviceDate, entity_id: book, book_why: bookWhy, billable_to: billableTo, duplicate_of: duplicateOf },
       raw_reply: aiRaw.slice(0, 4000),
     });
     if (auErr) console.warn("inbound-email: audit insert failed", auErr);
   }
 
   return new Response(
-    JSON.stringify({ ok: true, id: receiptId, entity: route.entityId, vendor: fields.vendor, status: fields.status }),
+    JSON.stringify({ ok: true, id: receiptId, entity: book, why: bookWhy, billableTo, duplicateOf, vendor: fields.vendor, status: fields.status }),
     { status: 200, headers: { ...corsHeaders(), "content-type": "application/json" } },
   );
 });
@@ -316,17 +373,17 @@ function corsHeaders() {
   };
 }
 
-function parseToAddress(addr: string): { entityId: string | null; baseAddress: string } {
+function parseToAddress(addr: string): { entityId: string | null; baseAddress: string; explicit: boolean } {
   const m = addr.match(/^([^+@]+)(?:\+([^@]+))?@(.+)$/);
-  if (!m) return { entityId: null, baseAddress: addr };
+  if (!m) return { entityId: null, baseAddress: addr, explicit: false };
   const local = m[1];
   const tag = (m[2] ?? "").toLowerCase();
   const domain = m[3];
   const baseAddress = `${local}@${domain}`;
   if (tag && TAG_TO_ENTITY[tag]) {
-    return { entityId: TAG_TO_ENTITY[tag], baseAddress };
+    return { entityId: TAG_TO_ENTITY[tag], baseAddress, explicit: true };
   }
-  return { entityId: ENTITY_BY_ADDRESS[baseAddress] ?? null, baseAddress };
+  return { entityId: ENTITY_BY_ADDRESS[baseAddress] ?? null, baseAddress, explicit: false };
 }
 
 function extractVendor(fromName: string, fromEmail: string): string {

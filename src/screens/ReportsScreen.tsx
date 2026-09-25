@@ -26,7 +26,7 @@ import { Report } from '../types';
 import { colors, type, reportStatusMeta } from '../theme';
 
 export function ReportsScreen() {
-  const { state, navigate, openReport } = useStore();
+  const { receipts, trips, navigate, openReport } = useStore();
   const [reports, setReports] = useState<Report[]>([]);
   const [billedIds, setBilledIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -69,8 +69,8 @@ export function ReportsScreen() {
   const currentPeriodStart = useMemo(() => periodStartFor(today), [today]);
   const currentPeriodEnd = useMemo(() => periodEndFor(today), [today]);
   const currentPeriodReceipts = useMemo(
-    () => receiptsForPeriod(state.receipts, 'kai', currentPeriodStart, currentPeriodEnd),
-    [state.receipts, currentPeriodStart, currentPeriodEnd],
+    () => receiptsForPeriod(receipts, 'kai', currentPeriodStart, currentPeriodEnd),
+    [receipts, currentPeriodStart, currentPeriodEnd],
   );
   // USD only — other currencies are shown separately, never added in.
   const currentPeriodCents = useMemo(
@@ -82,8 +82,8 @@ export function ReportsScreen() {
     [currentPeriodReceipts],
   );
   const carryOvers = useMemo(
-    () => (loading ? [] : unbilledCarryOvers(state.receipts, billedIds, currentPeriodStart)),
-    [loading, state.receipts, billedIds, currentPeriodStart],
+    () => (loading ? [] : unbilledCarryOvers(receipts, billedIds, currentPeriodStart)),
+    [loading, receipts, billedIds, currentPeriodStart],
   );
 
   // The current period as a virtual "Report" card. If a saved/sent report
@@ -158,7 +158,7 @@ export function ReportsScreen() {
         )}
 
         {/* Organize sweep entry — surfaces only when there are unfiled receipts */}
-        {state.receipts.some(r => r.billableTo === undefined) && (
+        {receipts.some(r => r.billableTo === undefined) && (
           <Pressable
             onPress={() => navigate('organize')}
             style={({ pressed }) => [styles.organizeBtn, pressed && { opacity: 0.7 }]}
@@ -166,12 +166,26 @@ export function ReportsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.organizeTitle}>Organize unfiled receipts</Text>
               <Text style={styles.organizeSub}>
-                {state.receipts.filter(r => r.billableTo === undefined).length} need a billing decision
+                {receipts.filter(r => r.billableTo === undefined).length} need a billing decision
               </Text>
             </View>
             <Icon name="chevron" size={14} color={colors.modern.inkTertiary} />
           </Pressable>
         )}
+
+        {/* Trips decide which receipts land in the KAI book */}
+        <Pressable
+          onPress={() => navigate('trips')}
+          style={({ pressed }) => [styles.tripsBtn, pressed && { opacity: 0.7 }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tripsTitle}>Trips</Text>
+            <Text style={styles.tripsSub}>
+              {trips.length === 0 ? 'Add a KAI trip so its receipts file themselves' : `${trips.length} trip${trips.length === 1 ? '' : 's'} · receipts in these dates file themselves`}
+            </Text>
+          </View>
+          <Icon name="chevron" size={14} color={colors.modern.inkTertiary} />
+        </Pressable>
 
         <Text style={[styles.eyebrow, { marginTop: 18, marginLeft: 4 }]}>Periods</Text>
 
@@ -297,6 +311,13 @@ const styles = StyleSheet.create({
     fontSize: 13, color: colors.modern.inkTertiary,
     textAlign: 'center', lineHeight: 18,
   },
+  tripsBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
+    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12,
+    backgroundColor: colors.modern.surface, borderWidth: 0.5, borderColor: colors.modern.border,
+  },
+  tripsTitle: { fontSize: 13, fontWeight: '500', color: colors.modern.ink },
+  tripsSub: { fontSize: 11, color: colors.modern.inkTertiary, marginTop: 1 },
   organizeBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.modern.amberSoft,

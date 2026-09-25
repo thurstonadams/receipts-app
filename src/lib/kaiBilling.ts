@@ -51,12 +51,18 @@ export function kaiBillability(r: Pick<Receipt, 'category' | 'vendor'>): Billabi
  * billable, that sticks. Software never defaults on.
  */
 export function defaultBillToKai(
-  r: Pick<Receipt, 'entityId' | 'billableTo' | 'source' | 'createdAt' | 'updatedAt' | 'category' | 'vendor'>,
+  r: Pick<Receipt, 'entityId' | 'billableTo' | 'source' | 'createdAt' | 'updatedAt' | 'category' | 'vendor'> & Pick<Partial<Receipt>, 'reviewReason'>,
 ): boolean {
   if (r.billableTo === 'kai') return true;
+  // Might already be on an invoice as another receipt: never pre-tick it.
+  if (isPossibleDuplicate(r)) return false;
   if (r.entityId !== 'kai' || !isKaiBillable(r)) return false;
   if (r.billableTo === undefined) return true;
   return r.source === 'email' && r.updatedAt === r.createdAt;
+}
+
+export function isPossibleDuplicate(r: Pick<Partial<Receipt>, 'reviewReason'>): boolean {
+  return (r.reviewReason ?? '').startsWith('Possible duplicate');
 }
 
 export function isKaiBillable(r: Pick<Receipt, 'category' | 'vendor'>): boolean {

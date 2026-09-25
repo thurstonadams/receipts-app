@@ -48,6 +48,8 @@ export interface Extraction {
   category: string | null;        // one of CATEGORIES
   confidence: 'high' | 'medium' | 'low';
   note: string | null;            // short reason when something is uncertain
+  book_hint?: 'xfix' | 'kai' | 'personal' | null; // AI's guess at the book; trips override it
+  service_date?: string | null;   // YYYY-MM-DD first night / travel date for hotels, flights, trains
 }
 
 export interface Decision {
@@ -180,10 +182,12 @@ Rules:
 - For delivery/ride apps the vendor is the app ("Uber Eats", "Uber"), not the restaurant.
 - category = exactly one of: ${CATEGORIES.join(' | ')}.
 - is_receipt = false for login links, password resets, marketing, booking enquiries, or itineraries without a price.
+- service_date = for hotels, flights, trains and car rentals: the first night / travel date (YYYY-MM-DD), even if paid earlier. Otherwise null.
+- book_hint = "personal" for groceries, personal shopping, streaming, gym or anything clearly private; "xfix" for software, SaaS, cloud hosting, AI tools or domains; otherwise null. Never guess "kai". Food delivery and rides → null.
 - confidence = "high" only if vendor, date, total and currency are all clearly stated. Otherwise "medium" or "low", and say what is uncertain in note (max 12 words).
 
 Reply with ONE JSON object and nothing else:
-{"is_receipt":true,"vendor":"...","date":"YYYY-MM-DD","total":0.00,"currency":"EUR","category":"...","confidence":"high","note":null}
+{"is_receipt":true,"vendor":"...","date":"YYYY-MM-DD","total":0.00,"currency":"EUR","category":"...","confidence":"high","note":null,"service_date":null,"book_hint":null}
 
 Subject: ${cleanSubject(input.subject)}
 Forwarded from original sender: ${forwardedFrom ? `${forwardedFrom.name ?? ''} <${forwardedFrom.email ?? ''}>` : 'unknown'}
@@ -221,6 +225,15 @@ export function parseExtraction(reply: string): Extraction | null {
     category: category && (CATEGORIES as readonly string[]).includes(category) ? category : null,
     confidence: conf === 'high' || conf === 'medium' || conf === 'low' ? conf : 'low',
     note: str(o.note),
+    service_date: ((): string | null => {
+      const d = str(o.service_date);
+      return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+    })(),
+    book_hint: ((): Extraction['book_hint'] => {
+      const b = str(o.book_hint)?.toLowerCase();
+      // "kai" is only ever set by a trip, never by the model.
+      return b === 'xfix' || b === 'personal' ? b : null;
+    })(),
   };
 }
 

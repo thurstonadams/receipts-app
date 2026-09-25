@@ -14,7 +14,9 @@ import { EntityPill } from '../components/EntityPill';
 import { Icon, IconName } from '../components/Icon';
 import { ReceiptRow } from '../components/ReceiptRow';
 import { fmtDateFull, fmtTotalsByCurrency } from '../lib/format';
+import { needsAttention as isYellow, isNotAReceipt } from '../lib/receiptFlags';
 import { colors, type } from '../theme';
+import * as Application from 'expo-application';
 import appJson from '../../app.json';
 
 type StatusFilter = null | 'synced' | 'ready' | 'needs-review';
@@ -24,13 +26,18 @@ const FILTER_TITLES: Record<Exclude<StatusFilter, null>, string> = {
   'needs-review': 'Needs review',
 };
 
-const BUILD_NUMBER = (appJson as { expo: { ios: { buildNumber: string } } }).expo.ios.buildNumber;
-const APP_VERSION = (appJson as { expo: { version: string } }).expo.version;
+// EAS numbers builds remotely (eas.json appVersionSource: remote), so app.json
+// no longer knows the build. Read it from the installed binary; app.json is
+// only the fallback for web/dev.
+const BUILD_NUMBER = Application.nativeBuildVersion
+  ?? `${(appJson as { expo: { ios: { buildNumber: string } } }).expo.ios.buildNumber} (dev)`;
+const APP_VERSION = Application.nativeApplicationVersion ?? (appJson as { expo: { version: string } }).expo.version;
 
 export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
   const { currentEntity, receiptsForEntity, navigate, unsyncedCount, retryPendingSync, refreshFromCloud } = useStore();
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(null);
+  const [trayOpen, setTrayOpen] = useState(false);
 
   const toggleFilter = (s: Exclude<StatusFilter, null>) =>
     setStatusFilter(prev => (prev === s ? null : s));
@@ -57,6 +64,10 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
           onPress: () => navigate('reports'),
         },
         {
+          text: 'Trips',
+          onPress: () => navigate('trips'),
+        },
+        {
           text: 'Forwarding addresses',
           onPress: () => navigate('forwarding'),
         },
@@ -71,7 +82,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
 
   const stats = useMemo(() => {
     const total = fmtTotalsByCurrency(receiptsForEntity);
-    const review = receiptsForEntity.filter(r => r.status === 'needs-review').length;
+    const review = receiptsForEntity.filter(isYellow).length;
     const ready = receiptsForEntity.filter(r => r.status === 'ready').length;
     const synced = receiptsForEntity.filter(r => r.status === 'synced').length;
     return { total, review, ready, synced };
@@ -79,10 +90,11 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
 
   const isPersonal = currentEntity.id === 'personal';
   const today = fmtDateFull(new Date().toISOString().slice(0, 10));
-  const needsAttention = receiptsForEntity.filter(r => r.status === 'needs-review');
+  const needsAttention = receiptsForEntity.filter(isYellow);
+  const notReceipts = receiptsForEntity.filter(isNotAReceipt);
   const recent = receiptsForEntity.filter(r => r.status !== 'needs-review').slice(0, 6);
   const filtered = statusFilter
-    ? receiptsForEntity.filter(r => r.status === statusFilter)
+    ? receiptsForEntity.filter(r => (statusFilter === 'needs-review' ? isYellow(r) : r.status === statusFilter))
     : [];
 
   return (
@@ -196,6 +208,33 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
                     <ReceiptRow key={r.id} receipt={r} onPress={() => navigate('review', r.id)} highlight />
                   ))}
                 </View>
+              </>
+            )}
+
+            {/* Not a receipt — login links, marketing. Out of the yellow list;
+                open one to keep it (Save) or delete it. */}
+            {notReceipts.length > 0 && (
+              <>
+                <SectionHeader
+                  title={`Not a receipt (${notReceipts.length})`}
+                  right={trayOpen ? 'Hide' : 'Show'}
+                  onRightPress={() => setTrayOpen(o => !o)}
+                />
+                {trayOpen && (
+                  <View style={styles.sectionPad}>
+                    <View style={styles.embeddedList}>
+                      {notReceipts.map((r, i) => (
+                        <ReceiptRow
+                          key={r.id}
+                          receipt={r}
+                          onPress={() => navigate('review', r.id)}
+                          embedded
+                          isLast={i === notReceipts.length - 1}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                )}
               </>
             )}
 

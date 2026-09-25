@@ -10,6 +10,7 @@ import { Icon } from './Icon';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { colors } from '../theme';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
+import { showAiTag } from '../lib/receiptFlags';
 
 interface Props {
   receipt: Receipt;
@@ -38,12 +39,17 @@ export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false,
           {receipt.source === 'email' && (
             <Icon name="mail" size={12} color={colors.modern.inkTertiary} />
           )}
-          <Text style={styles.vendor} numberOfLines={1}>
-            {receipt.vendor}
+          <Text style={[styles.vendor, !receipt.vendor && styles.vendorEmpty]} numberOfLines={1}>
+            {receipt.vendor || 'No vendor yet'}
           </Text>
           {receipt.billableTo === 'kai' && (
             <View style={styles.kaiTag}>
               <Text style={styles.kaiTagText}>KAI</Text>
+            </View>
+          )}
+          {showAiTag(receipt) && (
+            <View style={styles.aiTag}>
+              <Text style={styles.aiTagText}>AI</Text>
             </View>
           )}
         </View>
@@ -54,6 +60,11 @@ export function ReceiptRow({ receipt, onPress, embedded = false, isLast = false,
             {receipt.category}
           </Text>
         </View>
+        {receipt.status === 'needs-review' && (
+          <Text style={styles.reason} numberOfLines={1}>
+            {receipt.reviewReason || (!receipt.vendor || !receipt.total ? 'Add vendor and amount' : 'Check and save')}
+          </Text>
+        )}
       </View>
       <View style={styles.right}>
         <Text style={styles.total}>{fmtMoney(receipt.total, receipt.currency)}</Text>
@@ -117,6 +128,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     fontVariant: ['tabular-nums'],
   },
+  aiTag: {
+    backgroundColor: '#6D28D9',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  aiTagText: { color: '#FFFFFF', fontSize: 8, fontWeight: '700', letterSpacing: 0.4 },
+  vendorEmpty: { color: colors.modern.inkTertiary, fontStyle: 'italic' },
+  reason: { fontSize: 12, color: colors.modern.amberInk, fontWeight: '500', marginTop: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   meta: { fontSize: 12, color: colors.modern.inkTertiary, flexShrink: 1 },
   dot: { width: 2, height: 2, borderRadius: 99, backgroundColor: colors.modern.inkQuaternary },

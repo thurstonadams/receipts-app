@@ -19,6 +19,7 @@ import { ForwardingScreen } from './src/screens/ForwardingScreen';
 import { ReportsScreen } from './src/screens/ReportsScreen';
 import { PeriodDetailScreen } from './src/screens/PeriodDetailScreen';
 import { OrganizeScreen } from './src/screens/OrganizeScreen';
+import { TripsScreen } from './src/screens/TripsScreen';
 import { colors } from './src/theme';
 
 function Router() {
@@ -48,6 +49,7 @@ function Router() {
       {state.screen === 'reports'       && <ReportsScreen />}
       {state.screen === 'period-detail' && <PeriodDetailScreen />}
       {state.screen === 'organize'      && <OrganizeScreen />}
+      {state.screen === 'trips'         && <TripsScreen />}
 
       <EntitySwitcher
         visible={switcherOpen}
@@ -165,7 +167,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StoreProvider userId={session.user.id}>
+      <StoreProvider key={session.user.id} userId={session.user.id}>
         <Router />
       </StoreProvider>
     </SafeAreaProvider>

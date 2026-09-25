@@ -91,3 +91,13 @@ describe('review findings 2026-09-24', () => {
     expect(defaultBillToKai(r({ entityId: 'kai', billableTo: undefined, category: 'Software & Subscriptions' }))).toBe(false);
   });
 });
+
+describe('possible duplicates are never pre-ticked for KAI', () => {
+  const { defaultBillToKai } = require('./kaiBilling');
+  const row = { entityId: 'kai', billableTo: null, source: 'email', createdAt: 1, updatedAt: 1, category: 'Travel', vendor: 'Conrad Pune' };
+  test('untouched KAI email row → on', () => expect(defaultBillToKai(row)).toBe(true));
+  test('same row flagged "Possible duplicate …" → off', () =>
+    expect(defaultBillToKai({ ...row, reviewReason: 'Possible duplicate of Hilton Conrad Pune 2026-08-25 (USD 1861.97)' })).toBe(false));
+  test('an explicit Bill to KAI still wins', () =>
+    expect(defaultBillToKai({ ...row, billableTo: 'kai', reviewReason: 'Possible duplicate of X' })).toBe(true));
+});

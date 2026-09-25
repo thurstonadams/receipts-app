@@ -12,10 +12,15 @@ type Row = {
   source_subject: string | null;
   attachment_path: string | null;
   billable_to: string | null;
+  review_reason: string | null;
+  ai_extracted: boolean;
+  duplicate_of: string | null;
   created_at: number; updated_at: number;
 };
 
-function toRow(r: Receipt, userId: string): Row {
+// duplicate_of is owned by the server (email import / backfill). The app
+// never writes it, so a stale local copy can't un-hide a merged duplicate.
+function toRow(r: Receipt, userId: string): Omit<Row, 'duplicate_of' | 'review_reason' | 'ai_extracted'> & Partial<Pick<Row, 'review_reason' | 'ai_extracted'>> {
   return {
     id: r.id, user_id: userId, entity_id: r.entityId, vendor: r.vendor,
     date: r.date, total: r.total, currency: r.currency, payment: r.payment,
@@ -31,6 +36,13 @@ function toRow(r: Receipt, userId: string): Row {
     source_subject: r.sourceSubject ?? null,
     attachment_path: r.attachmentPath ?? null,
     billable_to: r.billableTo ?? null,
+    // A copy cached by an older build doesn't know these (undefined): leave
+    // the server's values alone. Otherwise the reason only means something
+    // while the receipt is yellow.
+    ...(r.reviewReason !== undefined || r.status !== 'needs-review'
+      ? { review_reason: r.status === 'needs-review' ? (r.reviewReason ?? null) : null }
+      : {}),
+    ...(r.aiExtracted !== undefined ? { ai_extracted: r.aiExtracted } : {}),
     created_at: r.createdAt, updated_at: r.updatedAt,
   };
 }
@@ -51,6 +63,9 @@ function fromRow(row: Row): Receipt {
     sourceSubject: row.source_subject ?? undefined,
     attachmentPath: row.attachment_path ?? undefined,
     billableTo: row.billable_to === 'kai' ? 'kai' : null,
+    reviewReason: row.review_reason ?? null,
+    aiExtracted: row.ai_extracted === true,
+    duplicateOf: row.duplicate_of ?? null,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
