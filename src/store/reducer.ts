@@ -104,7 +104,8 @@ export function mergeRemote(local: Receipt[], incoming: Receipt[], pendingSync: 
   const localOnly = local.filter(r => !incomingIds.has(r.id) && pending.has(r.id));
   const merged = live.map(r => {
     const l = localById.get(r.id);
-    if (l && l.updatedAt > r.updatedAt) return l;
+    // A newer local edit wins, except for duplicate_of, which only the server sets.
+    if (l && l.updatedAt > r.updatedAt) return { ...l, duplicateOf: r.duplicateOf ?? null };
     if (!l) return r;
     return {
       ...r,

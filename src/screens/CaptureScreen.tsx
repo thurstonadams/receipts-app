@@ -10,7 +10,7 @@ import { uid, todayISO } from '../lib/format';
 import { colors } from '../theme';
 
 export function CaptureScreen() {
-  const { navigate, addReceipt, currentEntity } = useStore();
+  const { navigate, addReceipt, bookForDate } = useStore();
   const [permission, requestPermission] = useCameraPermissions();
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -31,7 +31,7 @@ export function CaptureScreen() {
         const id = uid();
         const permanentUri = await persistCapturedPhoto(photo.uri, id);
         const receipt = addReceipt({
-          entityId: currentEntity.id,
+          entityId: bookForDate(todayISO()), // a trip covering today picks the book
           vendor: '',
           date: todayISO(),
           total: 0,

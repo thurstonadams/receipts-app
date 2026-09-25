@@ -22,13 +22,15 @@ import { Icon } from '../components/Icon';
 import { PickerSheet, PickerOption } from '../components/PickerSheet';
 import { CATEGORIES, PAYMENT_METHODS } from '../data/categories';
 import { useProjects } from '../lib/projects';
-import { fmtDateFull, currencySymbol, CURRENCIES } from '../lib/format';
+import { fmtDateFull, currencySymbol, currencyChoices } from '../lib/format';
+import { tripFor } from '../lib/trips';
+import { showAiTag } from '../lib/receiptFlags';
 import { supabase } from '../lib/supabase';
 import { colors, fonts, statusMeta } from '../theme';
 import { Receipt, Report } from '../types';
 import { useReceiptPhoto } from '../hooks/useReceiptPhoto';
 import { findReportForReceipt } from '../lib/reports';
-import { kaiBillability, defaultBillToKai } from '../lib/kaiBilling';
+import { kaiBillability, defaultBillToKai, isPossibleDuplicate } from '../lib/kaiBilling';
 
 function parseISODate(iso: string): Date {
   const d = new Date(iso + 'T00:00:00');
@@ -40,13 +42,17 @@ function toISODate(d: Date): string {
 }
 
 export function ReviewScreen() {
-  const { currentReceipt, updateReceipt, deleteReceipt, navigate, currentEntity, userId } = useStore();
+  const { currentReceipt, updateReceipt, deleteReceipt, navigate, entities, trips, userId } = useStore();
   const insets = useSafeAreaInsets();
   // Per-user, per-entity custom project list. Free-text — user types their
   // own and we persist the merged set in AsyncStorage.
-  const { projects: savedProjects, add: addProjectName } = useProjects(userId, currentEntity.id);
-
   const initial: Receipt | null = currentReceipt;
+  // Which book this receipt is filed in. The AI (or a trip) picked it; this
+  // is where Thurston overrides it.
+  const [book, setBook] = useState<string>(initial?.entityId ?? 'xfix');
+  const bookEntity = entities.find(e => e.id === book) ?? entities[0];
+  const { projects: savedProjects, add: addProjectName } = useProjects(userId, book);
+
   const [vendor, setVendor] = useState(initial?.vendor ?? '');
   const [totalText, setTotalText] = useState(initial ? initial.total.toFixed(2) : '0.00');
   const [date, setDate] = useState(initial?.date ?? '');
@@ -73,7 +79,7 @@ export function ReviewScreen() {
     return () => { cancelled = true; };
   }, [initial?.id]);
 
-  const [pickerOpen, setPickerOpen] = useState<'category' | 'payment' | 'project' | null>(null);
+  const [pickerOpen, setPickerOpen] = useState<'category' | 'payment' | 'project' | 'book' | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pendingDate, setPendingDate] = useState<Date>(() => parseISODate(initial?.date ?? ''));
 
@@ -86,6 +92,18 @@ export function ReviewScreen() {
     () => CATEGORIES.map(c => ({ value: c.name, label: c.name, sub: c.code })),
     []
   );
+  const bookOptions: PickerOption[] = useMemo(
+    () => entities.map(e => ({ value: e.id, label: e.short, sub: e.name })),
+    [entities]
+  );
+  const tripForDate = date ? tripFor(date, trips) : null;
+  // Moving a receipt into the KAI book turns "Bill to KAI" on (you can still
+  // switch it off); moving it to Personal turns it off.
+  const chooseBook = (id: string) => {
+    setBook(id);
+    if (id === 'kai' && billability.ok && !(initial && isPossibleDuplicate(initial))) setBillableToKai(true);
+    if (id === 'personal') setBillableToKai(false);
+  };
   const paymentOptions: PickerOption[] = useMemo(
     () => PAYMENT_METHODS.map(p => ({ value: p.label, label: p.label })),
     []
@@ -164,8 +182,14 @@ export function ReviewScreen() {
     const parsed = parseFloat(totalText.replace(/[^0-9.]/g, ''));
     const cat = CATEGORIES.find(c => c.name === category);
     const hasRequired = vendor.trim() && !isNaN(parsed) && parsed > 0;
+    const stillMissing = !vendor.trim() ? 'Vendor not found' : 'Amount not found';
     updateReceipt({
       ...initial!,
+      entityId: book,
+      // Saved by hand → no longer "AI-filled", and the yellow reason is either
+      // gone or says what is still missing.
+      aiExtracted: false,
+      reviewReason: hasRequired ? null : stillMissing,
       vendor: vendor.trim(),
       total: isNaN(parsed) ? 0 : parsed,
       date: trimmedDate,
@@ -212,7 +236,7 @@ export function ReviewScreen() {
     });
   };
 
-  const isBusiness = currentEntity.id !== 'personal';
+  const isBusiness = book !== 'personal';
   const statusInfo = statusMeta[initial.status] ?? statusMeta['needs-review'];
 
   return (
@@ -288,6 +312,20 @@ export function ReviewScreen() {
             </View>
           )}
 
+          {/* Why it is yellow — the reader says what it could not find */}
+          {initial.status === 'needs-review' && initial.reviewReason && (
+            <View style={styles.reasonBanner}>
+              <Text style={styles.reasonLabel}>NEEDS YOU</Text>
+              <Text style={styles.reasonText}>{initial.reviewReason}</Text>
+            </View>
+          )}
+          {showAiTag(initial) && (
+            <View style={styles.aiBanner}>
+              <View style={styles.aiChip}><Text style={styles.aiChipText}>AI</Text></View>
+              <Text style={styles.aiText}>Filled in by the reader. Check it, then Save.</Text>
+            </View>
+          )}
+
           {/* Billed-on backref — read-only traceability for already-invoiced receipts */}
           {billedOnReport && (
             <View style={styles.billedBanner}>
@@ -323,7 +361,7 @@ export function ReviewScreen() {
                 placeholderTextColor="rgba(255,255,255,0.3)"
               />
               <View style={styles.currencyToggle}>
-                {CURRENCIES.map(c => (
+                {currencyChoices(currency).map(c => (
                   <Pressable
                     key={c}
                     onPress={() => setCurrency(c)}
@@ -364,6 +402,12 @@ export function ReviewScreen() {
           {/* Bookkeeping */}
           <SectionHeader title="Bookkeeping" />
           <View style={styles.group}>
+            <PickerRow
+              label="Book"
+              value={bookEntity.short}
+              sub={tripForDate ? `Trip: ${tripForDate.name}` : undefined}
+              onPress={() => setPickerOpen('book')}
+            />
             <PickerRow
               label="Category"
               value={category || 'Select category'}
@@ -474,6 +518,7 @@ export function ReviewScreen() {
       </Modal>
 
       <PickerSheet visible={pickerOpen === 'category'} title="Category" options={categoryOptions} selected={category} onSelect={setCategory} onClose={() => setPickerOpen(null)} />
+      <PickerSheet visible={pickerOpen === 'book'} title="Book" options={bookOptions} selected={book} onSelect={chooseBook} onClose={() => setPickerOpen(null)} />
       <PickerSheet visible={pickerOpen === 'payment'} title="Payment Method" options={paymentOptions} selected={payment} onSelect={setPayment} onClose={() => setPickerOpen(null)} />
       <PickerSheet
         visible={pickerOpen === 'project'}
@@ -599,6 +644,23 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(38,72,110,0.18)',
   },
+  reasonBanner: {
+    marginHorizontal: 16, marginTop: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: colors.modern.amberSoft,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(217,119,6,0.25)',
+  },
+  reasonLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 1, color: colors.modern.amberInk, marginBottom: 3 },
+  reasonText: { fontSize: 14, color: colors.modern.amberInk, fontWeight: '500' },
+  aiBanner: {
+    marginHorizontal: 16, marginTop: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  aiChip: { backgroundColor: '#6D28D9', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  aiChipText: { color: '#fff', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+  aiText: { fontSize: 12, color: colors.textTertiary, flexShrink: 1 },
   billedBanner: {
     marginHorizontal: 16, marginTop: 12,
     paddingHorizontal: 14, paddingVertical: 10,

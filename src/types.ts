@@ -32,6 +32,21 @@ export interface Receipt {
   sourceSubject?: string; // Subject line when source='email'
   attachmentPath?: string; // receipt-attachments bucket key for the original .pdf/.eml/.html
   billableTo?: BillableTo | null; // tag for passthrough invoicing
+  reviewReason?: string | null; // why it is yellow ("Amount not found", "Possible duplicate of …")
+  aiExtracted?: boolean;       // filled by the AI reader and not yet saved by the user
+  duplicateOf?: string | null; // same charge received twice → hidden, linked to the primary
+  createdAt: number;
+  updatedAt: number;
+}
+
+// A date range whose receipts belong to one book (e.g. India → KAI).
+export interface Trip {
+  id: string;
+  name: string;
+  startDate: string; // yyyy-mm-dd inclusive
+  endDate: string;   // yyyy-mm-dd inclusive
+  entityId: 'xfix' | 'kai' | 'personal';
+  notes: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -113,4 +128,5 @@ export type Screen =
   | 'forwarding'
   | 'reports'         // KAI month-end (periods + carry-overs)
   | 'period-detail'   // single-report view
-  | 'organize';       // bulk Bill-to-KAI sweep
+  | 'organize'        // bulk Bill-to-KAI sweep
+  | 'trips';          // date ranges that pick the book

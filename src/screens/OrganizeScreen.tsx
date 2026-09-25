@@ -29,14 +29,14 @@ function suggestsBillable(receipt: Receipt): boolean {
 }
 
 export function OrganizeScreen() {
-  const { state, navigate, updateReceipt } = useStore();
+  const { receipts, navigate, updateReceipt } = useStore();
   const insets = useSafeAreaInsets();
 
   // Receipts that still need a decision — billableTo is undefined.
   // Note: explicit null means "decided not billable", and 'kai' means yes.
   const unfiled: Receipt[] = useMemo(
-    () => state.receipts.filter(r => r.billableTo === undefined).sort((a, b) => b.createdAt - a.createdAt),
-    [state.receipts],
+    () => receipts.filter(r => r.billableTo === undefined).sort((a, b) => b.createdAt - a.createdAt),
+    [receipts],
   );
 
   const [index, setIndex] = useState(0);

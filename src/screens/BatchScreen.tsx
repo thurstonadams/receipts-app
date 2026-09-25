@@ -16,7 +16,7 @@ interface Shot {
 }
 
 export function BatchScreen() {
-  const { navigate, addReceipt, currentEntity } = useStore();
+  const { navigate, addReceipt, bookForDate } = useStore();
   const [permission, requestPermission] = useCameraPermissions();
   const [shots, setShots] = useState<Shot[]>([]);
   const [flashOn, setFlashOn] = useState(false);
@@ -39,7 +39,7 @@ export function BatchScreen() {
         const uri = await persistCapturedPhoto(photo.uri, id);
         const tone = Math.floor(Math.random() * 360);
         addReceipt({
-          entityId: currentEntity.id,
+          entityId: bookForDate(todayISO()), // a trip covering today picks the book
           vendor: '',
           date: todayISO(),
           total: 0,

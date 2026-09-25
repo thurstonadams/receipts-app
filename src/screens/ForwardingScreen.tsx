@@ -89,9 +89,10 @@ export function ForwardingScreen() {
           <Text style={styles.heroKicker}>EMAIL → RECEIPT</Text>
           <Text style={styles.heroTitle}>Forward receipts straight into a book</Text>
           <Text style={styles.heroBody}>
-            Send (or forward) any receipt email to one of the addresses below. It
-            lands in that book within ~10 seconds, marked <Text style={styles.heroEmph}>Needs review</Text>{' '}
-            with the original attached.
+            Send (or forward) any receipt email to one of the addresses below. The reader
+            fills in vendor, date, amount and currency within ~10 seconds, with the original
+            attached. It only asks you (<Text style={styles.heroEmph}>Needs review</Text>) when
+            something is missing. Trips and software rules can file it in another book.
           </Text>
           <Text style={styles.heroBodySecondary}>
             Tip: long-press an address to share it to Contacts so you can pick it

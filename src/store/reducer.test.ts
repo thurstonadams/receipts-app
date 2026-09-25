@@ -179,3 +179,20 @@ describe('mergeRemote — review findings 2026-09-24', () => {
     expect(merged).toEqual([]);
   });
 });
+
+const dupRow = (o: Partial<Receipt>): Receipt => ({
+  id: 'a', entityId: 'kai', vendor: 'Uber', date: '2026-08-26', total: 47.18, currency: 'EUR', payment: '',
+  category: 'Travel', notes: '', status: 'ready', thumbTone: 0, createdAt: 1, updatedAt: 1, ...o,
+});
+
+describe('mergeRemote — duplicate_of is server-owned', () => {
+  test('a newer local edit still picks up the server duplicate link', () => {
+    const [m] = mergeRemote([dupRow({ updatedAt: 9, notes: 'mine' })], [dupRow({ updatedAt: 5, duplicateOf: 'p' })], []);
+    expect(m.notes).toBe('mine');
+    expect(m.duplicateOf).toBe('p');
+  });
+  test('server wins on ties, including the link', () => {
+    const [m] = mergeRemote([dupRow({})], [dupRow({ duplicateOf: 'p' })], []);
+    expect(m.duplicateOf).toBe('p');
+  });
+});
