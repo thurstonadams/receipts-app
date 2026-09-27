@@ -202,6 +202,6 @@ To wipe everything on device and start fresh: uninstall and reinstall. The next 
 2. Home screen: should show seed data (xFix book, ~3 receipts).
 3. Tap **Scan** → grant camera permission → point at anything → tap shutter.
 4. Review screen should appear with your photo. Fill vendor / total / category → **Save**.
-5. Back on Home, new row shows "Ready to sync".
+5. Back on Home, new row shows "Saved".
 6. Tap the blue CTA at the bottom → Report → **Export CSV** → share sheet opens.
 7. Switch book (tap the "BOOK · xFix" pill at the top) → KAI/Personal have their own seed receipts.

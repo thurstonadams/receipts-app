@@ -159,7 +159,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
             </View>
             <View style={styles.legend}>
               <Legend color={colors.modern.green} label="Synced" n={stats.synced} active={statusFilter === 'synced'} onPress={() => toggleFilter('synced')} />
-              <Legend color={colors.modern.brand} label="Ready"  n={stats.ready}  active={statusFilter === 'ready'}  onPress={() => toggleFilter('ready')} />
+              <Legend color={colors.modern.brand} label="Saved"  n={stats.ready}  active={statusFilter === 'ready'}  onPress={() => toggleFilter('ready')} />
               <Legend color={colors.modern.amber} label="Review" n={stats.review} active={statusFilter === 'needs-review'} onPress={() => toggleFilter('needs-review')} />
             </View>
           </View>

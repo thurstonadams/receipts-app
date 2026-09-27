@@ -87,7 +87,7 @@ export const statusMeta: Record<
 > = {
   processing:    { label: 'Processing',    bg: 'rgba(60,60,67,0.08)',  fg: 'rgba(60,60,67,0.75)', dot: '#8E8E93' },
   'needs-review':{ label: 'Needs review',  bg: 'rgba(191,90,60,0.1)',  fg: '#A94A2D',             dot: '#C25B3A' },
-  ready:         { label: 'Ready to sync', bg: 'rgba(38,72,110,0.08)', fg: colors.accent,         dot: colors.accent },
+  ready:         { label: 'Saved', bg: 'rgba(38,72,110,0.08)', fg: colors.accent,         dot: colors.accent },
   synced:        { label: 'Synced',        bg: 'rgba(46,95,90,0.08)',  fg: '#2E5F5A',             dot: '#2E5F5A' },
 };
 
