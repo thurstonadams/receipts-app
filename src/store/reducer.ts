@@ -11,6 +11,8 @@ export interface State {
   receipts: Receipt[];
   ready: boolean;
   pendingSync: string[];
+  /** Where Review's Back/Save/Delete returns to (the list it was opened from). */
+  backScreen: Screen;
 }
 
 export type Action =
@@ -34,6 +36,7 @@ export const initialState: State = {
   receipts: [],
   ready: false,
   pendingSync: [],
+  backScreen: 'home',
 };
 
 export function reducer(state: State, action: Action): State {
@@ -54,6 +57,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         screen: action.screen,
+        backScreen: action.screen === 'review' && state.screen !== 'review' ? state.screen : state.backScreen,
         currentReceiptId:
           action.receiptId === undefined ? state.currentReceiptId : action.receiptId,
       };
@@ -86,6 +90,23 @@ export function reducer(state: State, action: Action): State {
     default:
       return state;
   }
+}
+
+/**
+ * Ids whose copy on this device is newer than the cloud's. These are edits
+ * that never landed (lost upload, out-of-order upsert) and must be re-sent —
+ * otherwise mergeRemote keeps showing them locally forever while the cloud,
+ * and QuickBooks after it, never see them.
+ */
+export function newerOnDevice(local: Receipt[], incoming: Receipt[], pendingSync: string[]): string[] {
+  const pending = new Set(pendingSync);
+  const cloud = new Map(incoming.map(r => [r.id, r]));
+  return local
+    .filter(l => {
+      const c = cloud.get(l.id);
+      return c !== undefined && l.updatedAt > c.updatedAt && !pending.has(`del:${l.id}`);
+    })
+    .map(l => l.id);
 }
 
 /**

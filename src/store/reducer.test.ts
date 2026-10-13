@@ -1,4 +1,4 @@
-import { reducer, initialState, mergeRemote } from './reducer';
+import { reducer, initialState, mergeRemote, newerOnDevice } from './reducer';
 import { Receipt } from '../types';
 
 function r(id: string, partial: Partial<Receipt> = {}): Receipt {
@@ -195,4 +195,45 @@ describe('mergeRemote — duplicate_of is server-owned', () => {
     const [m] = mergeRemote([dupRow({})], [dupRow({ duplicateOf: 'p' })], []);
     expect(m.duplicateOf).toBe('p');
   });
+});
+
+describe('newerOnDevice (self-heal for edits that never reached the cloud)', () => {
+  test('THE BUG: a local edit newer than the cloud row is found, with nothing pending', () => {
+    const cloud = [r('blank', { vendor: '', total: 0, status: 'needs-review', updatedAt: 100 })];
+    const local = [r('blank', { vendor: 'Shell', total: 58.3, currency: 'EUR', status: 'ready', updatedAt: 200 })];
+    expect(newerOnDevice(local, cloud, [])).toEqual(['blank']);
+  });
+  test('identical or older local copies are left alone', () => {
+    const cloud = [r('a', { updatedAt: 100 }), r('b', { updatedAt: 100 })];
+    const local = [r('a', { updatedAt: 100 }), r('b', { updatedAt: 50 })];
+    expect(newerOnDevice(local, cloud, [])).toEqual([]);
+  });
+  test('a receipt queued for deletion is never re-uploaded', () => {
+    const cloud = [r('a', { updatedAt: 100 })];
+    const local = [r('a', { updatedAt: 200 })];
+    expect(newerOnDevice(local, cloud, ['del:a'])).toEqual([]);
+  });
+  test('local-only receipts are not included (pending queue owns those)', () => {
+    expect(newerOnDevice([r('x', { updatedAt: 5 })], [], [])).toEqual([]);
+  });
+  test('merge then heal: the merged list keeps the local edit and flags it', () => {
+    const cloud = [r('blank', { vendor: '', updatedAt: 100 })];
+    const local = [r('blank', { vendor: 'Shell', updatedAt: 200 })];
+    const merged = mergeRemote(local, cloud, []);
+    expect(merged.find(x => x.id === 'blank')!.vendor).toBe('Shell');
+    expect(newerOnDevice(local, cloud, [])).toEqual(['blank']);
+  });
+});
+
+describe('back screen for Review', () => {
+  test('opening a receipt from All receipts returns there', () => {
+    const s1 = reducer(initialState, { type: 'NAVIGATE', screen: 'search' });
+    const s2 = reducer(s1, { type: 'NAVIGATE', screen: 'review', receiptId: 'a' });
+    expect(s2.backScreen).toBe('search');
+  });
+  test('opening from Home returns Home', () => {
+    const s = reducer(initialState, { type: 'NAVIGATE', screen: 'review', receiptId: 'a' });
+    expect(s.backScreen).toBe('home');
+  });
+  test('defaults to home', () => expect(initialState.backScreen).toBe('home'));
 });

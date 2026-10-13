@@ -42,7 +42,7 @@ function toISODate(d: Date): string {
 }
 
 export function ReviewScreen() {
-  const { currentReceipt, updateReceipt, deleteReceipt, navigate, entities, trips, userId } = useStore();
+  const { state, currentReceipt, updateReceipt, deleteReceipt, navigate, entities, trips, userId } = useStore();
   const insets = useSafeAreaInsets();
   // Per-user, per-entity custom project list. Free-text — user types their
   // own and we persist the merged set in AsyncStorage.
@@ -202,7 +202,7 @@ export function ReviewScreen() {
       billableTo: billToKai ? 'kai' : null,
       status: hasRequired ? 'ready' : 'needs-review',
     });
-    navigate('home');
+    navigate(state.backScreen);
   };
 
   const handleDelete = () => {
@@ -213,7 +213,7 @@ export function ReviewScreen() {
         style: 'destructive',
         onPress: async () => {
           await deleteReceipt(initial.id);
-          navigate('home');
+          navigate(state.backScreen);
         },
       },
     ]);
@@ -247,7 +247,7 @@ export function ReviewScreen() {
       >
         {/* Nav */}
         <View style={styles.nav}>
-          <Pressable style={styles.navBtn} onPress={() => navigate('home')}>
+          <Pressable style={styles.navBtn} onPress={() => navigate(state.backScreen)}>
             <Icon name="chevronLeft" size={22} color={colors.accent} />
             <Text style={styles.navBack}>Back</Text>
           </Pressable>

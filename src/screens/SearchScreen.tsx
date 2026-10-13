@@ -1,7 +1,8 @@
-// Full-text search across the current entity's receipts. Matches across
-// vendor, category, code, notes, project and payment. Ranked rough-best-first:
-// an exact-prefix vendor match beats a substring match in notes.
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+// All receipts + search for the current book. With no query it lists every
+// receipt, newest first (this is where Home's "See all" lands). Typing filters
+// by vendor, amount ("58.30" / "58,30"), date ("Jul 29", "2026-07"),
+// category, notes, project and payment. Matching lives in lib/search.ts.
+import React, { useMemo, useState, useRef } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet, FlatList, Keyboard,
 } from 'react-native';
@@ -10,41 +11,22 @@ import { useStore } from '../store/StoreContext';
 import { Icon } from '../components/Icon';
 import { ReceiptRow } from '../components/ReceiptRow';
 import { colors } from '../theme';
-import { Receipt } from '../types';
+import { searchReceipts } from '../lib/search';
 
-function scoreMatch(r: Receipt, qLower: string): number {
-  if (!qLower) return 0;
-  const vendor = r.vendor.toLowerCase();
-  if (vendor.startsWith(qLower)) return 100;
-  if (vendor.includes(qLower)) return 80;
-  if ((r.category ?? '').toLowerCase().includes(qLower)) return 50;
-  if ((r.project ?? '').toLowerCase().includes(qLower)) return 40;
-  if ((r.payment ?? '').toLowerCase().includes(qLower)) return 30;
-  if ((r.notes ?? '').toLowerCase().includes(qLower)) return 20;
-  if ((r.categoryCode ?? '').toLowerCase().includes(qLower)) return 15;
-  return 0;
-}
+// Survives the trip into a receipt and back, so the list stays where it was.
+let lastQuery = '';
 
 export function SearchScreen() {
   const { navigate, receiptsForEntity, currentEntity } = useStore();
-  const [query, setQuery] = useState('');
+  const [query, setQueryState] = useState(lastQuery);
+  const setQuery = (q: string) => { lastQuery = q; setQueryState(q); };
   const inputRef = useRef<TextInput | null>(null);
 
-  useEffect(() => {
-    // Auto-focus the search field a tick after mount so the keyboard pops up.
-    const t = setTimeout(() => inputRef.current?.focus(), 80);
-    return () => clearTimeout(t);
-  }, []);
+  // No auto-focus: "See all" opens this as a list, and a keyboard popping up
+  // would cover it. Tap the field to search.
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const scored = receiptsForEntity
-      .map(r => ({ r, score: scoreMatch(r, q) }))
-      .filter(x => x.score > 0);
-    scored.sort((a, b) => b.score - a.score || b.r.updatedAt - a.r.updatedAt);
-    return scored.map(x => x.r);
-  }, [receiptsForEntity, query]);
+  const results = useMemo(() => searchReceipts(receiptsForEntity, query), [receiptsForEntity, query]);
+  const isAll = query.trim().length === 0;
 
   const clearQuery = () => { setQuery(''); inputRef.current?.focus(); };
 
@@ -55,7 +37,7 @@ export function SearchScreen() {
           <Icon name="chevronLeft" size={20} color={colors.accent} />
           <Text style={styles.navBack}>Home</Text>
         </Pressable>
-        <Text style={styles.navTitle}>Search · {currentEntity.short}</Text>
+        <Text style={styles.navTitle}>{isAll ? 'All receipts' : 'Search'} · {currentEntity.short}</Text>
         <View style={{ width: 80 }} />
       </View>
 
@@ -66,7 +48,7 @@ export function SearchScreen() {
             ref={inputRef}
             value={query}
             onChangeText={setQuery}
-            placeholder="Vendor, category, notes…"
+            placeholder="Vendor, amount, date (Jul 29)…"
             placeholderTextColor="rgba(60,60,67,0.4)"
             autoCapitalize="none"
             autoCorrect={false}
@@ -82,13 +64,11 @@ export function SearchScreen() {
         </View>
       </View>
 
-      {query.trim().length === 0 ? (
+      {results.length === 0 ? (
         <View style={styles.hint}>
-          <Text style={styles.hintText}>Start typing to search your receipts.</Text>
-        </View>
-      ) : results.length === 0 ? (
-        <View style={styles.hint}>
-          <Text style={styles.hintText}>No receipts match “{query}”.</Text>
+          <Text style={styles.hintText}>
+            {isAll ? 'No receipts in this book yet.' : `No receipts match “${query}”.`}
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -96,9 +76,14 @@ export function SearchScreen() {
           keyExtractor={r => r.id}
           contentContainerStyle={styles.listPad}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          initialNumToRender={20}
+          windowSize={7}
           ListHeaderComponent={
             <Text style={styles.count}>
-              {results.length} result{results.length === 1 ? '' : 's'}
+              {isAll
+                ? `All receipts · ${results.length} · newest first`
+                : `${results.length} result${results.length === 1 ? '' : 's'}`}
             </Text>
           }
           renderItem={({ item, index }) => (

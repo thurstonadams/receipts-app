@@ -241,7 +241,7 @@ export function HomeScreen({ onOpenSwitcher }: { onOpenSwitcher: () => void }) {
             {/* Recent */}
             {recent.length > 0 && (
               <>
-                <SectionHeader title="Recent" right="See all" />
+                <SectionHeader title="Recent" right={`See all ${receiptsForEntity.length}`} onRightPress={() => navigate('search')} />
                 <View style={styles.sectionPad}>
                   <View style={styles.embeddedList}>
                     {recent.map((r, i) => (
@@ -328,7 +328,7 @@ function SectionHeader({ title, right, onRightPress }: { title: string; right?: 
       <Text style={styles.sectionHeaderTitle}>{title.toUpperCase()}</Text>
       {right && (
         onRightPress
-          ? <Pressable onPress={onRightPress}><Text style={styles.sectionHeaderRight}>{right}</Text></Pressable>
+          ? <Pressable onPress={onRightPress} hitSlop={12} accessibilityRole="button"><Text style={styles.sectionHeaderRight}>{right}</Text></Pressable>
           : <Text style={styles.sectionHeaderRight}>{right}</Text>
       )}
     </View>

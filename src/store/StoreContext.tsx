@@ -8,7 +8,8 @@ import { fetchTrips, saveTrip as saveTripRemote, deleteTrip as deleteTripRemote,
 import { isVisible } from '../lib/receiptFlags';
 import { deletePhoto, uploadPhotoToStorage, deletePhotoFromStorage } from '../lib/photos';
 import { pushReceipt, deleteReceiptRemote, fetchAllReceipts, subscribeToReceipts } from '../lib/syncReceipts';
-import { reducer, initialState, State, mergeRemote } from './reducer';
+import { reducer, initialState, State, mergeRemote, newerOnDevice } from './reducer';
+import { createSerialPusher } from '../lib/pushQueue';
 
 // v3 keys are scoped by the authenticated user id so different accounts on the
 // same device don't bleed into each other's local cache. v2 keys (unscoped)
@@ -208,15 +209,19 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
 
   // Queue first, then push. If the app dies mid-upload the id is already in
   // the persisted queue, so the next refresh keeps the receipt and retries it.
-  const pushOne = useCallback(async (r: Receipt) => {
-    dispatch({ type: 'MARK_PENDING', key: r.id });
-    try {
-      await pushReceipt(r, userIdRef.current);
-      dispatch({ type: 'MARK_SYNCED', key: r.id });
-    } catch {
-      dispatch({ type: 'MARK_PENDING', key: r.id });
-    }
-  }, []);
+  // Uploads of the same receipt run one at a time, newest version last, so a
+  // slow older save can never overwrite a newer one in the cloud.
+  const pusherRef = useRef<ReturnType<typeof createSerialPusher<Receipt>> | null>(null);
+  if (!pusherRef.current) {
+    pusherRef.current = createSerialPusher<Receipt>(
+      r => pushReceipt(r, userIdRef.current),
+      {
+        onPending: id => dispatch({ type: 'MARK_PENDING', key: id }),
+        onSynced: id => dispatch({ type: 'MARK_SYNCED', key: id }),
+      },
+    );
+  }
+  const pushOne = useCallback((r: Receipt, opts?: { force?: boolean }) => pusherRef.current!.push(r, opts), []);
 
   const removeOne = useCallback(async (id: string) => {
     dispatch({ type: 'MARK_PENDING', key: `del:${id}` });
@@ -254,14 +259,22 @@ export function StoreProvider({ children, userId }: { children: React.ReactNode;
   const refreshFromCloud = useCallback(async () => {
     try {
       const incoming = await fetchAllReceipts();
+      const local = receiptsRef.current;
+      const stranded = newerOnDevice(local, incoming, pendingSyncRef.current);
       dispatch({
         type: 'REFRESH',
-        receipts: mergeRemote(receiptsRef.current, incoming, pendingSyncRef.current),
+        receipts: mergeRemote(local, incoming, pendingSyncRef.current),
       });
+      // Self-heal: edits that are newer here than in the cloud never landed.
+      // Re-send them (forced — the cloud just proved it does not hold them).
+      for (const id of stranded) {
+        const r = local.find(x => x.id === id);
+        if (r) pushOne(r, { force: true });
+      }
     } catch {
       // Network issue, etc. — leave state as-is.
     }
-  }, []);
+  }, [pushOne]);
 
   // Flush the retry queue. Reads the ref so it is safe to call from the
   // AppState listener and the post-hydrate effect below.
